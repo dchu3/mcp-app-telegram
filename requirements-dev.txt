@@ -2,5 +2,4 @@ pytest
 pytest-asyncio
 pytest-mock
 web3
-
-pytest
+python-telegram-bot[rate-limiter,job-queue]

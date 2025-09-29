@@ -1,7 +1,7 @@
-python-telegram-bot
+python-telegram-bot[rate-limiter,job-queue]
 requests
 aiohttp
 networkx
-
 tweepy
 web3
+httpx
