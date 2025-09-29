@@ -1,0 +1,6 @@
+pytest
+pytest-asyncio
+pytest-mock
+web3
+
+pytest

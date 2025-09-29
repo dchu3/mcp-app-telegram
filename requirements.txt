@@ -1,0 +1,7 @@
+python-telegram-bot
+requests
+aiohttp
+networkx
+
+tweepy
+web3
