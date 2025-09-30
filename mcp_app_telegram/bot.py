@@ -27,6 +27,7 @@ _LOGGER = logging.getLogger(__name__)
 REFRESH_QUERY = "gas_refresh"
 
 TELEGRAM_COMMANDS = [
+    BotCommand("help", "Show available commands"),
     BotCommand("gas", "Show Base gas stats"),
     BotCommand("account", "Show account balance and nonce"),
     BotCommand("tx", "Summarize transaction status"),
@@ -34,6 +35,21 @@ TELEGRAM_COMMANDS = [
     BotCommand("gas_sub_above", "Alert when fast gas rises above threshold"),
     BotCommand("gas_clear", "Clear gas alerts for this chat"),
 ]
+
+
+_HELP_TEXT = (
+    "Here are the commands I understand:\n"
+    "- /gas : Base gas tiers, base fee, and sequencer lag.\n"
+    "- /account <address> : Balance, nonce, and contract status for an address.\n"
+    "- /tx <hash> : Transaction status, gas used, and value.\n"
+    "- /gas_sub <gwei> : Alert when fast gas drops below a threshold.\n"
+    "- /gas_sub_above <gwei> : Alert when fast gas rises above a threshold.\n"
+    "- /gas_clear : Clear pending gas alerts in this chat."
+)
+
+
+async def _handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.effective_message.reply_text(_HELP_TEXT)
 
 
 async def _handle_gas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -196,6 +212,7 @@ def build_application(config: Config, client: EvmMcpClient, alert_manager: GasAl
         }
     )
 
+    application.add_handler(CommandHandler("help", _handle_help))
     application.add_handler(CommandHandler("gas", _handle_gas))
     application.add_handler(CommandHandler("account", _handle_account))
     application.add_handler(CommandHandler("tx", _handle_tx))
