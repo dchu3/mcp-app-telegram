@@ -7,8 +7,6 @@ import shlex
 from dataclasses import dataclass
 from typing import Final, Optional, Tuple
 
-import shlex
-
 MCP_PROTOCOL_MCP = "mcp"
 MCP_PROTOCOL_JSONRPC = "json-rpc"
 
@@ -33,6 +31,7 @@ class Config:
     mcp_network: str = "base"
     gemini_api_key: Optional[str] = None
     gemini_model: str = DEFAULT_GEMINI_MODEL
+    dexscreener_mcp_command: Optional[Tuple[str, ...]] = None
 
 
 def _require_env(key: str) -> str:
@@ -77,6 +76,18 @@ def load_config() -> Config:
     gemini_api_key = os.getenv("GEMINI_API_KEY")
     gemini_model = os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip() or DEFAULT_GEMINI_MODEL
 
+    dexscreener_command: Optional[Tuple[str, ...]] = None
+    dexscreener_command_env = os.getenv("DEXSCREENER_MCP_COMMAND")
+    dexscreener_root = os.getenv("DEXSCREENER_MCP_ROOT")
+    if dexscreener_command_env:
+        parts = tuple(shlex.split(dexscreener_command_env))
+        if not parts:
+            raise ConfigError("DEXSCREENER_MCP_COMMAND must not be empty when set")
+        dexscreener_command = parts
+    elif dexscreener_root:
+        entry = f"{dexscreener_root.rstrip('/')}/index.js"
+        dexscreener_command = ("node", entry)
+
     return Config(
         telegram_bot_token=token,
         telegram_chat_id=chat_id,
@@ -89,4 +100,5 @@ def load_config() -> Config:
         mcp_network=network,
         gemini_api_key=gemini_api_key,
         gemini_model=gemini_model,
+        dexscreener_mcp_command=dexscreener_command,
     )

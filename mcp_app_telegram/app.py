@@ -6,12 +6,17 @@ import asyncio
 import logging
 import signal
 from contextlib import suppress
+from typing import Optional
 
 from .alerts import GasAlertManager
 from .bot import TELEGRAM_COMMANDS, build_application
 from .config import ConfigError, load_config
-from .gemini_agent import GeminiAgent, GeminiAgentError
-from .mcp_client import EvmMcpClient
+from .gemini_agent import (
+    GeminiAgent,
+    GeminiAgentError,
+    build_dexscreener_tool_definitions,
+)
+from .mcp_client import DexscreenerMcpClient, EvmMcpClient
 
 
 async def run() -> None:
@@ -29,16 +34,28 @@ async def run() -> None:
         network=config.mcp_network,
     )
     await client.start()
+    dex_client: Optional[DexscreenerMcpClient] = None
+    if config.dexscreener_mcp_command:
+        dex_client = DexscreenerMcpClient(config.dexscreener_mcp_command)
+        await dex_client.start()
     alert_manager = GasAlertManager()
 
     agent = None
     if config.gemini_api_key:
         try:
             agent = GeminiAgent(client, config.gemini_api_key, model=config.gemini_model)
+            if dex_client is not None:
+                agent.extend_tools(build_dexscreener_tool_definitions(dex_client))
         except GeminiAgentError as exc:
             logging.getLogger(__name__).warning("Gemini agent disabled: %s", exc)
 
-    application = build_application(config, client, alert_manager, agent=agent)
+    application = build_application(
+        config,
+        client,
+        alert_manager,
+        agent=agent,
+        dex_client=dex_client,
+    )
 
     loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()
@@ -72,6 +89,9 @@ async def run() -> None:
         with suppress(Exception):
             await application.shutdown()
         await client.close()
+        if dex_client is not None:
+            with suppress(Exception):
+                await dex_client.close()
 
 
 def main() -> None:

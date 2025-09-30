@@ -45,6 +45,13 @@ class AccountSummary:
     is_contract: bool
 
 
+@dataclass(slots=True)
+class McpToolDefinition:
+    name: str
+    description: str
+    arguments: Dict[str, str]
+
+
 class EvmMcpClient:
     """Thin wrapper over HTTP requests to an MCP or JSON-RPC endpoint."""
 
@@ -197,6 +204,257 @@ class EvmMcpClient:
             nonce=nonce,
             is_contract=is_contract,
         )
+
+    async def _ensure_stdio(self) -> None:
+        if self._protocol != MCP_PROTOCOL_MCP:
+            return
+        if self._stdio_client is not None:
+            return
+        client = McpStdioClient(self._stdio_command)
+        await client.start()
+        self._stdio_client = client
+
+    async def _call_tool_json(self, name: str, arguments: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+        await self._ensure_stdio()
+        if self._stdio_client is None:
+            raise McpClientError("MCP stdio client not running")
+        try:
+            result = await self._stdio_client.call_tool(name, arguments or {})
+        except McpStdioError as exc:
+            raise McpClientError(str(exc)) from exc
+        if result.get("isError"):
+            raise McpClientError(f"MCP tool {name} reported error")
+        content = result.get("content")
+        if not isinstance(content, list):
+            tool_result = result.get("toolResult")
+            if isinstance(tool_result, Mapping):
+                return dict(tool_result)
+            raise McpClientError(f"Invalid MCP tool response from {name}: {result!r}")
+        for item in content:
+            if isinstance(item, Mapping) and item.get("type") == "text":
+                text = item.get("text", "")
+                if not isinstance(text, str):
+                    continue
+                try:
+                    return json.loads(text)
+                except json.JSONDecodeError:
+                    continue
+        raise McpClientError(f"Tool {name} did not return JSON content")
+
+    async def _fetch_gas_stats_mcp(self) -> GasStats:
+        block = await self._call_tool_json(
+            "get_latest_block",
+            {"network": self._network},
+        )
+        base_fee_hex = str(block.get("baseFeePerGas") or "0x0")
+        base_fee_wei = int(base_fee_hex, 16)
+        base_fee_gwei = base_fee_wei / 1_000_000_000 if base_fee_wei else 0.0
+
+        timestamp_hex = str(block.get("timestamp") or "0x0")
+        try:
+            block_timestamp = int(timestamp_hex, 16)
+        except ValueError:
+            block_timestamp = 0
+        block_lag = max(0.0, time() - block_timestamp) if block_timestamp else 0.0
+
+        safe = max(base_fee_gwei * 1.05, base_fee_gwei)
+        standard = max(base_fee_gwei * 1.15, base_fee_gwei)
+        fast = max(base_fee_gwei * 1.25, base_fee_gwei)
+
+        return GasStats(
+            safe=safe,
+            standard=standard,
+            fast=fast,
+            block_lag_seconds=block_lag,
+            base_fee=base_fee_gwei,
+        )
+
+    async def _fetch_transaction_mcp(self, tx_hash: str) -> TransactionSummary:
+        tx = await self._call_tool_json(
+            "get_transaction",
+            {"txHash": tx_hash, "network": self._network},
+        )
+
+        receipt = await self._call_tool_json(
+            "get_transaction_receipt",
+            {"txHash": tx_hash, "network": self._network},
+        )
+
+        status_hex = str(receipt.get("status") or "0x0")
+        status = "success" if int(status_hex, 16) == 1 else "failed"
+        gas_used = receipt.get("gasUsed")
+        gas_used_int = int(gas_used, 16) if isinstance(gas_used, str) else None
+
+        nonce_hex = tx.get("nonce")
+        nonce = int(nonce_hex, 16) if isinstance(nonce_hex, str) else None
+
+        value_hex = tx.get("value")
+        value_wei = int(value_hex, 16) if isinstance(value_hex, str) else None
+
+        return TransactionSummary(
+            hash=tx.get("hash", tx_hash),
+            status=status,
+            from_address=tx.get("from"),
+            to_address=tx.get("to"),
+            gas_used=gas_used_int,
+            nonce=nonce,
+            value_wei=value_wei,
+        )
+
+    async def _fetch_account_mcp(self, address: str) -> AccountSummary:
+        balance = await self._call_tool_json(
+            "get_balance",
+            {"address": address, "network": self._network},
+        )
+        is_contract_info = await self._call_tool_json(
+            "is_contract",
+            {"address": address, "network": self._network},
+        )
+
+        balance_wei = (
+            int(balance.get("wei", 0))
+            if isinstance(balance.get("wei"), str)
+            else int(balance.get("wei", 0) or 0)
+        )
+
+        nonce = await self._fetch_nonce_via_rpc(address)
+
+        return AccountSummary(
+            address=balance.get("address", address),
+            balance_wei=balance_wei,
+            nonce=nonce,
+            is_contract=bool(is_contract_info.get("isContract")),
+        )
+
+    async def _fetch_nonce_via_rpc(self, address: str) -> int:
+        try:
+            info = await self._call_tool_json("get_chain_info", {"network": self._network})
+        except McpClientError:
+            info = {}
+        rpc_url = info.get("rpcUrl") if isinstance(info, Mapping) else None
+        if not rpc_url:
+            return 0
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            payload = {
+                "jsonrpc": "2.0",
+                "method": "eth_getTransactionCount",
+                "params": [address, "latest"],
+                "id": 1,
+            }
+            response = await client.post(rpc_url, json=payload)
+            response.raise_for_status()
+            data = response.json()
+            result = data.get("result")
+            if isinstance(result, str):
+                return int(result, 16)
+        return 0
+
+
+def _extract_arguments_from_schema(schema: Mapping[str, Any]) -> Dict[str, str]:
+    properties = schema.get("properties") if isinstance(schema, Mapping) else None
+    if not isinstance(properties, Mapping):
+        return {}
+
+    arguments: Dict[str, str] = {}
+    for key, spec in properties.items():
+        if not isinstance(spec, Mapping):
+            continue
+        description = spec.get("description")
+        if not isinstance(description, str) or not description.strip():
+            title = spec.get("title")
+            if isinstance(title, str) and title.strip():
+                description = title.strip()
+            else:
+                type_hint = spec.get("type")
+                description = f"{type_hint}" if isinstance(type_hint, str) else "(value)"
+        arguments[str(key)] = description.strip()
+    return arguments
+
+
+class DexscreenerMcpClient:
+    """Client wrapper for interacting with the Dexscreener MCP server."""
+
+    def __init__(
+        self,
+        command: Sequence[str],
+        *,
+        env: Optional[Mapping[str, str]] = None,
+        cwd: Optional[str] = None,
+    ) -> None:
+        if not command:
+            raise McpClientError("Dexscreener MCP command must not be empty")
+        self._stdio = McpStdioClient(command, env=env, cwd=cwd)
+        self._tools: List[McpToolDefinition] = []
+
+    async def start(self) -> None:
+        try:
+            await self._stdio.start()
+        except McpStdioError as exc:
+            raise McpClientError(f"Failed to start Dexscreener MCP server: {exc}") from exc
+
+        try:
+            listing = await self._stdio.list_tools()
+        except McpStdioError as exc:
+            raise McpClientError(f"Failed to list Dexscreener MCP tools: {exc}") from exc
+
+        tools_payload = listing.get("tools") if isinstance(listing, Mapping) else None
+        if not isinstance(tools_payload, list):
+            raise McpClientError("Dexscreener MCP server returned invalid tool listing")
+
+        parsed: List[McpToolDefinition] = []
+        for raw_tool in tools_payload:
+            if not isinstance(raw_tool, Mapping):
+                continue
+            name = raw_tool.get("name")
+            description = raw_tool.get("description")
+            input_schema = raw_tool.get("inputSchema")
+            if not isinstance(name, str) or not name:
+                continue
+            if not isinstance(description, str) or not description:
+                description = "Dexscreener tool"
+            arguments = (
+                _extract_arguments_from_schema(input_schema)
+                if isinstance(input_schema, Mapping)
+                else {}
+            )
+            parsed.append(McpToolDefinition(name=name, description=description.strip(), arguments=arguments))
+
+        self._tools = parsed
+
+    async def close(self) -> None:
+        await self._stdio.close()
+
+    @property
+    def tools(self) -> Sequence[McpToolDefinition]:
+        return tuple(self._tools)
+
+    async def call_tool(self, name: str, arguments: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+        try:
+            return await self._stdio.call_tool(name, arguments)
+        except McpStdioError as exc:
+            raise McpClientError(f"Dexscreener tool '{name}' failed: {exc}") from exc
+
+    def parse_tool_result(self, result: Any) -> Optional[Dict[str, Any]]:
+        if not isinstance(result, Mapping):
+            return None
+
+        content = result.get("content")
+        if isinstance(content, Sequence):
+            for item in content:
+                if isinstance(item, Mapping) and item.get("type") == "text":
+                    text = item.get("text")
+                    if isinstance(text, str):
+                        try:
+                            parsed = json.loads(text)
+                        except json.JSONDecodeError:
+                            continue
+                        return parsed if isinstance(parsed, dict) else None
+
+        tool_result = result.get("toolResult")
+        if isinstance(tool_result, Mapping):
+            return dict(tool_result)
+
+        return None
 
     async def _ensure_stdio(self) -> None:
         if self._protocol != MCP_PROTOCOL_MCP:

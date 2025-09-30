@@ -21,7 +21,7 @@ from .alerts import GasAlertManager, GasAlertSubscription
 from .config import Config
 from .formatting import format_account, format_gas_stats, format_transaction
 from .gemini_agent import GeminiAgent, GeminiAgentError
-from .mcp_client import EvmMcpClient, McpClientError
+from .mcp_client import DexscreenerMcpClient, EvmMcpClient, McpClientError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,6 +49,34 @@ _HELP_TEXT = (
     "- /gas_sub_above <gwei> : Alert when fast gas rises above a threshold.\n"
     "- /gas_clear : Clear pending gas alerts in this chat."
 )
+
+_TELEGRAM_MESSAGE_LIMIT = 4000
+
+
+async def _reply_text_chunks(message, text: str) -> None:
+    text = text.strip()
+    if not text:
+        return
+
+    if len(text) <= _TELEGRAM_MESSAGE_LIMIT:
+        await message.reply_text(text)
+        return
+
+    cursor = 0
+    length = len(text)
+    while cursor < length:
+        remaining = text[cursor:]
+        if len(remaining) <= _TELEGRAM_MESSAGE_LIMIT:
+            chunk = remaining
+            cursor = length
+        else:
+            window = remaining[:_TELEGRAM_MESSAGE_LIMIT]
+            split = max(window.rfind("\n\n"), window.rfind("\n"), window.rfind(" "))
+            if split <= 0:
+                split = _TELEGRAM_MESSAGE_LIMIT
+            chunk = window[:split]
+            cursor += split
+        await message.reply_text(chunk.strip())
 
 
 async def _handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -127,7 +155,7 @@ async def _handle_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         _LOGGER.exception("Unexpected failure in /ask handler")
         await update.effective_message.reply_text("An unexpected error occurred while answering.")
     else:
-        await update.effective_message.reply_text(answer)
+        await _reply_text_chunks(update.effective_message, answer)
 
 
 
@@ -224,6 +252,7 @@ def build_application(
     alert_manager: GasAlertManager,
     *,
     agent: Optional[GeminiAgent] = None,
+    dex_client: Optional[DexscreenerMcpClient] = None,
 ) -> Application:
     request = HTTPXRequest(
         read_timeout=config.telegram_read_timeout,
@@ -246,6 +275,7 @@ def build_application(
             "mcp_client": client,
             "alert_manager": alert_manager,
             "agent": agent,
+            "dex_client": dex_client,
         }
     )
 
