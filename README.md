@@ -42,6 +42,7 @@ The bot starts long-polling until you press `Ctrl+C`. When running in MCP mode i
 
 ## Telegram Commands
 
+- `/help` – quick reference for all available commands.
 - `/gas` – current Base gas tiers with sequencer lag and base fee.
 - `/account <address>` – account balance, nonce, and contract status (supports both MCP and JSON-RPC backends).
 - `/tx <hash>` – summary of a transaction, including status and gas usage.
