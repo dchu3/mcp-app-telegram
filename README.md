@@ -8,6 +8,7 @@ Async Telegram bot that surfaces Base Chain data through the MCP EVM server (or 
 - Node.js 18+ (needed for `npx @mcpdotdirect/evm-mcp-server`)
 - Telegram bot token with API access
 - MCP-compatible EVM server **or** a Base RPC endpoint (e.g., `https://mainnet.base.org`)
+- Gemini API key (optional, enables the `/ask` command via Gemini)
 
 ## Setup
 
@@ -24,12 +25,14 @@ Async Telegram bot that surfaces Base Chain data through the MCP EVM server (or 
    export TELEGRAM_MCP_BOT_TOKEN="<bot-token>"
    export TELEGRAM_CHAT_ID="<default-chat-id>"
    export ONCHAIN_VALIDATION_RPC_URL="https://mainnet.base.org"  # optional JSON-RPC fallback
+   export GEMINI_API_KEY="<gemini-api-key>"  # optional, required for /ask
    ```
    Additional knobs:
    - `MCP_EVM_BASE_URL` – direct MCP endpoint (defaults to `http://localhost:8080`).
    - `MCP_EVM_PROTOCOL` – force `mcp` or `json-rpc`.
    - `MCP_EVM_SERVER_COMMAND` – override the spawned stdio server command (default `npx -y @mcpdotdirect/evm-mcp-server`).
    - `MCP_EVM_NETWORK` – target network for MCP tool calls (defaults to `base`).
+   - `GEMINI_MODEL` – override the Gemini model used for `/ask` (default `gemini-1.5-flash-latest`).
    - `TELEGRAM_HTTP_READ_TIMEOUT` / `TELEGRAM_HTTP_CONNECT_TIMEOUT` – override Telegram HTTP timeouts.
 
 ## Running the bot
@@ -43,11 +46,14 @@ The bot starts long-polling until you press `Ctrl+C`. When running in MCP mode i
 ## Telegram Commands
 
 - `/help` – quick reference for all available commands.
+- `/ask <question>` – Gemini agent interprets the request and invokes an MCP tool when helpful.
 - `/gas` – current Base gas tiers with sequencer lag and base fee.
 - `/account <address>` – account balance, nonce, and contract status (supports both MCP and JSON-RPC backends).
 - `/tx <hash>` – summary of a transaction, including status and gas usage.
 - `/gas_sub <threshold>` / `/gas_sub_above <threshold>` – one-off alerts when fast gas drops below or rises above a threshold.
 - `/gas_clear` – clear pending gas alerts for the chat.
+
+The `/ask` command uses Gemini to pick between gas stats, account, and transaction lookups. When no Gemini API key is configured the command replies with setup guidance.
 
 ## Testing
 

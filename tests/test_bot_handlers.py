@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mcp_app_telegram.bot import _handle_account, _handle_gas, _handle_help
+from mcp_app_telegram.bot import _handle_account, _handle_ask, _handle_gas, _handle_help
 from mcp_app_telegram.bot import TELEGRAM_COMMANDS
 from mcp_app_telegram.mcp_client import AccountSummary, GasStats
 
@@ -85,11 +85,50 @@ async def test_handle_help_outputs_summary():
 
     assert message.replies
     help_text, _ = message.replies[0]
+    assert "/ask" in help_text
     assert "/gas" in help_text
     assert "/account" in help_text
     assert "\n- /gas_clear" in help_text
 
 
+@pytest.mark.asyncio
+async def test_handle_ask_requires_question():
+    message = DummyMessage()
+    update = SimpleNamespace(effective_message=message, effective_chat=SimpleNamespace(id=1))
+    context = DummyContext(args=[], bot_data={})
+
+    await _handle_ask(update, context)
+
+    assert message.replies
+    assert "Usage" in message.replies[0][0]
+
+
+@pytest.mark.asyncio
+async def test_handle_ask_requires_agent():
+    message = DummyMessage()
+    update = SimpleNamespace(effective_message=message, effective_chat=SimpleNamespace(id=1))
+    context = DummyContext(args=["what", "are", "gas", "fees"], bot_data={})
+
+    await _handle_ask(update, context)
+
+    assert message.replies
+    assert "GEMINI_API_KEY" in message.replies[0][0]
+
+
+@pytest.mark.asyncio
+async def test_handle_ask_success():
+    message = DummyMessage()
+    update = SimpleNamespace(effective_message=message, effective_chat=SimpleNamespace(id=1))
+    agent = SimpleNamespace(answer=AsyncMock(return_value="hello"))
+    context = DummyContext(args=["hello"], bot_data={"agent": agent})
+
+    await _handle_ask(update, context)
+
+    agent.answer.assert_awaited_once_with("hello")
+    assert message.replies
+    assert message.replies[0][0] == "hello"
+
+
 def test_commands_registered():
     names = {cmd.command for cmd in TELEGRAM_COMMANDS}
-    assert {"help", "gas", "account", "tx", "gas_sub", "gas_sub_above", "gas_clear"}.issubset(names)
+    assert {"help", "ask", "gas", "account", "tx", "gas_sub", "gas_sub_above", "gas_clear"}.issubset(names)

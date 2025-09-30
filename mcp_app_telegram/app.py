@@ -10,6 +10,7 @@ from contextlib import suppress
 from .alerts import GasAlertManager
 from .bot import TELEGRAM_COMMANDS, build_application
 from .config import ConfigError, load_config
+from .gemini_agent import GeminiAgent, GeminiAgentError
 from .mcp_client import EvmMcpClient
 
 
@@ -29,7 +30,15 @@ async def run() -> None:
     )
     await client.start()
     alert_manager = GasAlertManager()
-    application = build_application(config, client, alert_manager)
+
+    agent = None
+    if config.gemini_api_key:
+        try:
+            agent = GeminiAgent(client, config.gemini_api_key, model=config.gemini_model)
+        except GeminiAgentError as exc:
+            logging.getLogger(__name__).warning("Gemini agent disabled: %s", exc)
+
+    application = build_application(config, client, alert_manager, agent=agent)
 
     loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()

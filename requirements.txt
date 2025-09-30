@@ -5,3 +5,4 @@ networkx
 tweepy
 web3
 httpx
+google-generativeai

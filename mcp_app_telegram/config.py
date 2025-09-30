@@ -13,6 +13,7 @@ MCP_PROTOCOL_MCP = "mcp"
 MCP_PROTOCOL_JSONRPC = "json-rpc"
 
 DEFAULT_MCP_BASE_URL: Final[str] = "http://localhost:8080"
+DEFAULT_GEMINI_MODEL: Final[str] = "gemini-1.5-flash-latest"
 
 
 class ConfigError(RuntimeError):
@@ -30,6 +31,8 @@ class Config:
     mcp_protocol: str = MCP_PROTOCOL_MCP
     mcp_server_command: Optional[Tuple[str, ...]] = None
     mcp_network: str = "base"
+    gemini_api_key: Optional[str] = None
+    gemini_model: str = DEFAULT_GEMINI_MODEL
 
 
 def _require_env(key: str) -> str:
@@ -71,6 +74,8 @@ def load_config() -> Config:
         command = parts
 
     network = os.getenv("MCP_EVM_NETWORK", "base").strip() or "base"
+    gemini_api_key = os.getenv("GEMINI_API_KEY")
+    gemini_model = os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip() or DEFAULT_GEMINI_MODEL
 
     return Config(
         telegram_bot_token=token,
@@ -82,4 +87,6 @@ def load_config() -> Config:
         mcp_protocol=protocol or MCP_PROTOCOL_MCP,
         mcp_server_command=command,
         mcp_network=network,
+        gemini_api_key=gemini_api_key,
+        gemini_model=gemini_model,
     )
