@@ -20,6 +20,7 @@ from telegram.request import HTTPXRequest
 from .alerts import GasAlertManager, GasAlertSubscription
 from .config import Config
 from .formatting import format_account, format_gas_stats, format_transaction
+from .gemini_agent import GeminiAgent, GeminiAgentError
 from .mcp_client import EvmMcpClient, McpClientError
 
 _LOGGER = logging.getLogger(__name__)
@@ -28,6 +29,7 @@ REFRESH_QUERY = "gas_refresh"
 
 TELEGRAM_COMMANDS = [
     BotCommand("help", "Show available commands"),
+    BotCommand("ask", "Ask Gemini to run an MCP tool"),
     BotCommand("gas", "Show Base gas stats"),
     BotCommand("account", "Show account balance and nonce"),
     BotCommand("tx", "Summarize transaction status"),
@@ -39,6 +41,7 @@ TELEGRAM_COMMANDS = [
 
 _HELP_TEXT = (
     "Here are the commands I understand:\n"
+    "- /ask <question> : Gemini agent picks an MCP tool to answer.\n"
     "- /gas : Base gas tiers, base fee, and sequencer lag.\n"
     "- /account <address> : Balance, nonce, and contract status for an address.\n"
     "- /tx <hash> : Transaction status, gas used, and value.\n"
@@ -98,6 +101,33 @@ async def _handle_tx(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         _LOGGER.exception("Transaction lookup failed")
         await update.effective_message.reply_text(f"Error fetching transaction: {exc}")
         return
+
+    await update.effective_message.reply_text(format_transaction(summary))
+
+
+async def _handle_ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.args:
+        await update.effective_message.reply_text("Usage: /ask <question>")
+        return
+
+    agent: Optional[GeminiAgent] = context.application.bot_data.get("agent")
+    question = " ".join(context.args).strip()
+
+    if agent is None:
+        await update.effective_message.reply_text(
+            "The Gemini agent is not configured. Set GEMINI_API_KEY to enable /ask."
+        )
+        return
+
+    try:
+        answer = await agent.answer(question)
+    except GeminiAgentError as exc:
+        await update.effective_message.reply_text(f"Gemini agent error: {exc}")
+    except Exception as exc:  # pragma: no cover - defensive guard
+        _LOGGER.exception("Unexpected failure in /ask handler")
+        await update.effective_message.reply_text("An unexpected error occurred while answering.")
+    else:
+        await update.effective_message.reply_text(answer)
 
 
 
@@ -188,7 +218,13 @@ async def gas_monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             _LOGGER.warning("Failed to send alert to %s: %s", subscription.chat_id, exc)
 
 
-def build_application(config: Config, client: EvmMcpClient, alert_manager: GasAlertManager) -> Application:
+def build_application(
+    config: Config,
+    client: EvmMcpClient,
+    alert_manager: GasAlertManager,
+    *,
+    agent: Optional[GeminiAgent] = None,
+) -> Application:
     request = HTTPXRequest(
         read_timeout=config.telegram_read_timeout,
         connect_timeout=config.telegram_connect_timeout,
@@ -209,10 +245,12 @@ def build_application(config: Config, client: EvmMcpClient, alert_manager: GasAl
             "config": config,
             "mcp_client": client,
             "alert_manager": alert_manager,
+            "agent": agent,
         }
     )
 
     application.add_handler(CommandHandler("help", _handle_help))
+    application.add_handler(CommandHandler("ask", _handle_ask))
     application.add_handler(CommandHandler("gas", _handle_gas))
     application.add_handler(CommandHandler("account", _handle_account))
     application.add_handler(CommandHandler("tx", _handle_tx))

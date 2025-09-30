@@ -3,3 +3,4 @@ pytest-asyncio
 pytest-mock
 web3
 python-telegram-bot[rate-limiter,job-queue]
+google-generativeai
