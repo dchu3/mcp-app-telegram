@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Iterable
+import json
+from typing import Iterable, Mapping, Any, Optional, Sequence
 
 from .mcp_client import AccountSummary, GasStats, TransactionSummary
 
@@ -65,3 +66,73 @@ def format_account(summary: AccountSummary) -> str:
         "Type: Contract" if summary.is_contract else "Type: Externally Owned Account",
     )
     return "\n".join(lines)
+
+
+def format_generic_tool_result(name: str, result: Mapping[str, Any]) -> str:
+    """Render an MCP tool result as formatted JSON for Telegram."""
+
+    pretty = json.dumps(result, indent=2, sort_keys=True)
+    header = f"🛠️ {name} result" if name else "🛠️ Tool result"
+    return f"{header}\n```json\n{pretty}\n```"
+
+
+def _format_float(value: Optional[float]) -> str:
+    if value is None:
+        return "n/a"
+    if value >= 1:
+        return f"{value:,.2f}"
+    return f"{value:.4f}"
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def format_dexscreener_pairs(result: Mapping[str, Any]) -> Optional[str]:
+    pairs = result.get("pairs")
+    if not isinstance(pairs, Sequence):
+        return None
+    if not pairs:
+        return "📊 Dexscreener: No matching pairs returned."
+
+    best = None
+    best_volume = -1.0
+    for candidate in pairs:
+        if not isinstance(candidate, Mapping):
+            continue
+        vol = _safe_float((candidate.get("volume") or {}).get("h24")) or 0.0
+        if vol > best_volume:
+            best_volume = vol
+            best = candidate
+
+    if best is None:
+        return None
+
+    base = best.get("baseToken") if isinstance(best.get("baseToken"), Mapping) else {}
+    quote = best.get("quoteToken") if isinstance(best.get("quoteToken"), Mapping) else {}
+
+    base_symbol = base.get("symbol") or base.get("name") or "?"
+    quote_symbol = quote.get("symbol") or quote.get("name") or "?"
+    price_usd = _safe_float(best.get("priceUsd"))
+    volume_24h = best_volume if best_volume >= 0 else None
+    liquidity_usd = _safe_float((best.get("liquidity") or {}).get("usd"))
+    chain = best.get("chainId") or "?"
+    dex = best.get("dexId") or best.get("dex") or "?"
+
+    summary = (
+        f"{base_symbol}/{quote_symbol} on {chain} ({dex}) is trading at ${_format_float(price_usd)}"
+        f" (24h vol ${_format_float(volume_24h)}, TVL ${_format_float(liquidity_usd)})."
+    )
+
+    extras = sum(1 for candidate in pairs if isinstance(candidate, Mapping)) - 1
+    if extras > 0:
+        summary += f" {extras} other match(es) available; narrow your query for specifics."
+
+    url = best.get("url")
+    if isinstance(url, str) and url:
+        return f"📊 Dexscreener: {summary}\n🔗 {url}"
+
+    return f"📊 Dexscreener: {summary}"

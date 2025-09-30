@@ -5,10 +5,21 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional, Sequence
 
-from .formatting import format_account, format_gas_stats, format_transaction
-from .mcp_client import EvmMcpClient, McpClientError
+from .formatting import (
+    format_account,
+    format_gas_stats,
+    format_generic_tool_result,
+    format_transaction,
+    format_dexscreener_pairs,
+)
+from .mcp_client import (
+    DexscreenerMcpClient,
+    EvmMcpClient,
+    McpClientError,
+    McpToolDefinition,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -26,20 +37,12 @@ class _AgentPlan:
     reply: Optional[str]
 
 
-_TOOL_DESCRIPTIONS: Dict[str, Dict[str, Any]] = {
-    "gas_stats": {
-        "description": "Retrieve latest Base gas tiers (safe/standard/fast), base fee, and sequencer lag.",
-        "arguments": {},
-    },
-    "account_overview": {
-        "description": "Summarise account balance, nonce, and contract status for a 0x-prefixed address.",
-        "arguments": {"address": "Hex string 0x... (42 chars)"},
-    },
-    "transaction_status": {
-        "description": "Get transaction status, gas used, participants, and value for a transaction hash.",
-        "arguments": {"tx_hash": "Hex string 0x... (66 chars)"},
-    },
-}
+@dataclass(slots=True)
+class ToolDefinition:
+    name: str
+    description: str
+    arguments: Mapping[str, str]
+    handler: Callable[[Mapping[str, Any]], Awaitable[str]]
 
 
 class GeminiAgent:
@@ -52,11 +55,21 @@ class GeminiAgent:
         *,
         model: str = DEFAULT_GEMINI_MODEL,
         llm: Optional["_GeminiModelWrapper"] = None,
+        tools: Optional[Sequence[ToolDefinition]] = None,
     ) -> None:
         if llm is None and not api_key:
             raise GeminiAgentError("Gemini API key is required when llm wrapper is not provided")
         self._client = mcp_client
         self._llm = llm or _GeminiModelWrapper(api_key or "", model=model)
+        self._tool_definitions: List[ToolDefinition] = list(tools or self._default_tool_definitions())
+        self._tool_handlers: Dict[str, Callable[[Mapping[str, Any]], Awaitable[str]]] = {
+            tool.name: tool.handler for tool in self._tool_definitions
+        }
+
+    def extend_tools(self, tools: Sequence[ToolDefinition]) -> None:
+        for tool in tools:
+            self._tool_definitions.append(tool)
+            self._tool_handlers[tool.name] = tool.handler
 
     async def answer(self, question: str) -> str:
         """Return a response for ``question`` using MCP data where helpful."""
@@ -77,11 +90,7 @@ class GeminiAgent:
 
         tool_result: Optional[str] = None
         if plan.tool:
-            handler = {
-                "gas_stats": self._run_gas_stats,
-                "account_overview": self._run_account_overview,
-                "transaction_status": self._run_transaction_status,
-            }.get(plan.tool)
+            handler = self._tool_handlers.get(plan.tool)
 
             if handler is None:
                 _LOGGER.warning("Unsupported tool requested by Gemini: %s", plan.tool)
@@ -145,9 +154,9 @@ class GeminiAgent:
 
     def _build_prompt(self, question: str) -> str:
         tool_lines = []
-        for name, spec in _TOOL_DESCRIPTIONS.items():
-            args_text = json.dumps(spec.get("arguments", {}))
-            tool_lines.append(f"- {name}: {spec['description']} Arguments: {args_text}")
+        for tool in self._tool_definitions:
+            args_text = json.dumps(tool.arguments)
+            tool_lines.append(f"- {tool.name}: {tool.description} Arguments: {args_text}")
 
         tools_block = "\n".join(tool_lines)
         prompt = (
@@ -165,6 +174,58 @@ class GeminiAgent:
             "Respond with valid JSON and nothing else."
         )
         return prompt
+
+    def _default_tool_definitions(self) -> Sequence[ToolDefinition]:
+        return (
+            ToolDefinition(
+                name="gas_stats",
+                description="Retrieve latest Base gas tiers (safe/standard/fast), base fee, and sequencer lag.",
+                arguments={},
+                handler=self._run_gas_stats,
+            ),
+            ToolDefinition(
+                name="account_overview",
+                description="Summarise account balance, nonce, and contract status for a 0x-prefixed address.",
+                arguments={"address": "Hex string 0x... (42 chars)"},
+                handler=self._run_account_overview,
+            ),
+            ToolDefinition(
+                name="transaction_status",
+                description="Get transaction status, gas used, participants, and value for a transaction hash.",
+                arguments={"tx_hash": "Hex string 0x... (66 chars)"},
+                handler=self._run_transaction_status,
+            ),
+        )
+
+
+def build_dexscreener_tool_definitions(
+    client: DexscreenerMcpClient,
+) -> Sequence[ToolDefinition]:
+    definitions: List[ToolDefinition] = []
+    for tool in client.tools:
+        async def _handler(args: Mapping[str, Any], *, _tool=tool) -> str:
+            try:
+                raw_result = await client.call_tool(_tool.name, args)
+            except McpClientError as exc:
+                return f"Dexscreener error: {exc}"
+
+            parsed = client.parse_tool_result(raw_result)
+            if isinstance(parsed, Mapping):
+                summary = format_dexscreener_pairs(parsed)
+                if summary:
+                    return summary
+
+            return "Dexscreener returned data I couldn't summarise. Try narrowing the query."
+
+        definitions.append(
+            ToolDefinition(
+                name=tool.name,
+                description=tool.description,
+                arguments=tool.arguments,
+                handler=_handler,
+            )
+        )
+    return definitions
 
 
 class _GeminiModelWrapper:
