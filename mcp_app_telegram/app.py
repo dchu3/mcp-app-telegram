@@ -116,6 +116,7 @@ async def run() -> None:
                 config.primary_evm_server,
                 config.gemini_api_key,
                 model=config.gemini_model,
+                persona=config.gemini_persona,
             )
             if dex_client is not None:
                 agent.extend_tools(build_dexscreener_tool_definitions(dex_client))
