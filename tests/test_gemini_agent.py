@@ -1,5 +1,4 @@
 import json
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -9,7 +8,8 @@ from mcp_app_telegram.gemini_agent import (
     ToolDefinition,
     build_dexscreener_tool_definitions,
 )
-from mcp_app_telegram.mcp_client import GasStats, McpToolDefinition
+from mcp_app_telegram.mcp_client import EvmMcpClient, GasStats, McpToolDefinition
+from mcp_app_telegram.mcp.manager import McpClientRegistry
 
 
 class FakeLLM:
@@ -27,16 +27,13 @@ class FakeLLM:
 @pytest.mark.asyncio
 async def test_agent_runs_gas_tool():
     gas_stats = GasStats(safe=0.5, standard=0.7, fast=1.1, block_lag_seconds=2.0, base_fee=0.6)
-    client = SimpleNamespace(
-        fetch_gas_stats=AsyncMock(return_value=gas_stats),
-        fetch_account=AsyncMock(),
-        fetch_transaction=AsyncMock(),
-    )
+    client = StubEvmClient()
+    client.fetch_gas_stats.return_value = gas_stats
     llm = FakeLLM([
         '{"tool": "gas_stats", "arguments": {}, "reply": "Here are the latest gas metrics."}'
     ])
 
-    agent = GeminiAgent(client, llm=llm)
+    agent = build_agent(client, llm)
     answer = await agent.answer("What are gas fees right now?")
 
     client.fetch_gas_stats.assert_awaited_once()
@@ -46,16 +43,12 @@ async def test_agent_runs_gas_tool():
 
 @pytest.mark.asyncio
 async def test_agent_handles_direct_reply_only():
-    client = SimpleNamespace(
-        fetch_gas_stats=AsyncMock(),
-        fetch_account=AsyncMock(),
-        fetch_transaction=AsyncMock(),
-    )
+    client = StubEvmClient()
     llm = FakeLLM([
         '{"tool": null, "arguments": {}, "reply": "I don\'t need a tool for that."}'
     ])
 
-    agent = GeminiAgent(client, llm=llm)
+    agent = build_agent(client, llm)
     answer = await agent.answer("Say hi")
 
     assert answer == "I don't need a tool for that."
@@ -64,16 +57,12 @@ async def test_agent_handles_direct_reply_only():
 
 @pytest.mark.asyncio
 async def test_agent_reports_when_tool_arguments_missing():
-    client = SimpleNamespace(
-        fetch_gas_stats=AsyncMock(),
-        fetch_account=AsyncMock(),
-        fetch_transaction=AsyncMock(),
-    )
+    client = StubEvmClient()
     llm = FakeLLM([
         '{"tool": "account_overview", "arguments": {}, "reply": "Let me check that."}'
     ])
 
-    agent = GeminiAgent(client, llm=llm)
+    agent = build_agent(client, llm)
     answer = await agent.answer("What about 0x?")
 
     assert "Let me check that." in answer
@@ -82,11 +71,7 @@ async def test_agent_reports_when_tool_arguments_missing():
 
 @pytest.mark.asyncio
 async def test_agent_supports_added_tools():
-    client = SimpleNamespace(
-        fetch_gas_stats=AsyncMock(),
-        fetch_account=AsyncMock(),
-        fetch_transaction=AsyncMock(),
-    )
+    client = StubEvmClient()
     llm = FakeLLM([
         '{"tool": "dex_tool", "arguments": {"symbol": "WETH"}, "reply": "Fetching pair data."}'
     ])
@@ -95,7 +80,7 @@ async def test_agent_supports_added_tools():
         assert args == {"symbol": "WETH"}
         return "Dex output"
 
-    agent = GeminiAgent(client, llm=llm)
+    agent = build_agent(client, llm)
     agent.extend_tools(
         [
             ToolDefinition(
@@ -239,3 +224,16 @@ async def test_dexscreener_handler_unparseable_payload():
     response = await handler({})
 
     assert "couldn't summarise" in response
+class StubEvmClient(EvmMcpClient):
+    def __init__(self) -> None:
+        # Bypass parent initialisation.
+        # pylint: disable=super-init-not-called
+        self.fetch_gas_stats = AsyncMock()
+        self.fetch_account = AsyncMock()
+        self.fetch_transaction = AsyncMock()
+
+
+def build_agent(client: StubEvmClient, llm: FakeLLM) -> GeminiAgent:
+    registry = McpClientRegistry()
+    registry.register("evm", client)
+    return GeminiAgent(registry, "evm", llm=llm)

@@ -20,6 +20,7 @@ from .mcp_client import (
     McpClientError,
     McpToolDefinition,
 )
+from .mcp.manager import McpClientRegistry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,7 +51,8 @@ class GeminiAgent:
 
     def __init__(
         self,
-        mcp_client: EvmMcpClient,
+        registry: McpClientRegistry,
+        primary_evm_key: str,
         api_key: Optional[str] = None,
         *,
         model: str = DEFAULT_GEMINI_MODEL,
@@ -59,7 +61,9 @@ class GeminiAgent:
     ) -> None:
         if llm is None and not api_key:
             raise GeminiAgentError("Gemini API key is required when llm wrapper is not provided")
-        self._client = mcp_client
+        self._registry = registry
+        self._primary_evm_key = primary_evm_key
+        self._evm_client = registry.require_typed(primary_evm_key, EvmMcpClient)
         self._llm = llm or _GeminiModelWrapper(api_key or "", model=model)
         self._tool_definitions: List[ToolDefinition] = list(tools or self._default_tool_definitions())
         self._tool_handlers: Dict[str, Callable[[Mapping[str, Any]], Awaitable[str]]] = {
@@ -113,7 +117,7 @@ class GeminiAgent:
         return "\n\n".join(part for part in message_parts if part)
 
     async def _run_gas_stats(self, _: Mapping[str, Any]) -> str:
-        stats = await self._client.fetch_gas_stats()
+        stats = await self._evm_client.fetch_gas_stats()
         return format_gas_stats(stats)
 
     async def _run_account_overview(self, args: Mapping[str, Any]) -> str:
@@ -123,7 +127,7 @@ class GeminiAgent:
         addr = address.strip().lower()
         if not (addr.startswith("0x") and len(addr) == 42):
             raise GeminiAgentError("Provided address is not a valid 42-character hex string")
-        summary = await self._client.fetch_account(addr)
+        summary = await self._evm_client.fetch_account(addr)
         return format_account(summary)
 
     async def _run_transaction_status(self, args: Mapping[str, Any]) -> str:
@@ -133,7 +137,7 @@ class GeminiAgent:
         tx = tx_hash.strip().lower()
         if not (tx.startswith("0x") and len(tx) == 66):
             raise GeminiAgentError("Provided transaction hash must be a 66-character hex string")
-        summary = await self._client.fetch_transaction(tx)
+        summary = await self._evm_client.fetch_transaction(tx)
         return format_transaction(summary)
 
     async def _plan(self, question: str) -> _AgentPlan:

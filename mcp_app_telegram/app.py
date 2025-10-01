@@ -6,17 +6,23 @@ import asyncio
 import logging
 import signal
 from contextlib import suppress
-from typing import Optional
+from typing import Dict, Optional
 
 from .alerts import GasAlertManager
 from .bot import TELEGRAM_COMMANDS, build_application
-from .config import ConfigError, load_config
+from .config import (
+    DEFAULT_MCP_BASE_URL,
+    MCP_PROTOCOL_JSONRPC,
+    ConfigError,
+    load_config,
+)
 from .gemini_agent import (
     GeminiAgent,
     GeminiAgentError,
     build_dexscreener_tool_definitions,
 )
-from .mcp_client import DexscreenerMcpClient, EvmMcpClient
+from .mcp import DexscreenerMcpClient, EvmMcpClient
+from .mcp.manager import McpClientRegistry
 from .database import initialize_database
 
 
@@ -29,24 +35,81 @@ async def run() -> None:
         logging.getLogger(__name__).error("Configuration error: %s", exc)
         raise
 
-    client = EvmMcpClient(
-        config.mcp_base_url,
-        protocol=config.mcp_protocol,
-        command=config.mcp_server_command,
-        network=config.mcp_network,
-        rpc_urls={"base": config.mcp_base_url},
-    )
-    await client.start()
+    registry = McpClientRegistry()
+    network_client_map: Dict[str, str] = {}
+
+    evm_client: Optional[EvmMcpClient] = None
     dex_client: Optional[DexscreenerMcpClient] = None
-    if config.dexscreener_mcp_command:
-        dex_client = DexscreenerMcpClient(config.dexscreener_mcp_command)
-        await dex_client.start()
+
+    for server in config.mcp_servers:
+        if server.kind == "evm":
+            base_url = (
+                server.base_url
+                or next(iter(server.rpc_urls.values()), DEFAULT_MCP_BASE_URL)
+                or DEFAULT_MCP_BASE_URL
+            )
+            network = (server.network or "base").lower()
+            rpc_urls = {str(k).lower(): str(v) for k, v in server.rpc_urls.items()}
+            if server.protocol == MCP_PROTOCOL_JSONRPC:
+                if not rpc_urls:
+                    rpc_urls[network] = base_url
+            elif not rpc_urls:
+                rpc_urls[network] = base_url
+            client = EvmMcpClient(
+                base_url,
+                protocol=server.protocol,
+                command=server.server_command,
+                network=network,
+                rpc_urls=rpc_urls,
+            )
+            registry.register(server.key, client)
+            if network:
+                network_client_map.setdefault(network.lower(), server.key)
+            for known_network in rpc_urls.keys():
+                network_client_map.setdefault(str(known_network).lower(), server.key)
+            if server.key == config.primary_evm_server:
+                evm_client = client
+        elif server.kind == "dexscreener":
+            if not server.server_command:
+                raise ConfigError(
+                    f"Dexscreener MCP server '{server.key}' requires DEXSCREENER_MCP_COMMAND or equivalent"
+                )
+            client = DexscreenerMcpClient(
+                server.server_command,
+                env=server.env or None,
+                cwd=server.cwd,
+            )
+            registry.register(server.key, client)
+            if server.key == config.primary_dexscreener_server:
+                dex_client = client
+        else:
+            logging.getLogger(__name__).warning(
+                "Ignoring MCP server '%s' with unsupported kind '%s'",
+                server.key,
+                server.kind,
+            )
+
+    if evm_client is None:
+        raise ConfigError(
+            f"Primary EVM MCP server '{config.primary_evm_server}' is not configured"
+        )
+    if config.primary_dexscreener_server and dex_client is None:
+        raise ConfigError(
+            f"Primary Dexscreener MCP server '{config.primary_dexscreener_server}' is not configured"
+        )
+
+    await registry.start_all()
     alert_manager = GasAlertManager()
 
     agent = None
     if config.gemini_api_key:
         try:
-            agent = GeminiAgent(client, config.gemini_api_key, model=config.gemini_model)
+            agent = GeminiAgent(
+                registry,
+                config.primary_evm_server,
+                config.gemini_api_key,
+                model=config.gemini_model,
+            )
             if dex_client is not None:
                 agent.extend_tools(build_dexscreener_tool_definitions(dex_client))
         except GeminiAgentError as exc:
@@ -54,10 +117,13 @@ async def run() -> None:
 
     application = build_application(
         config,
-        client,
+        registry,
         alert_manager,
         agent=agent,
         dex_client=dex_client,
+        primary_evm_key=config.primary_evm_server,
+        primary_dex_key=config.primary_dexscreener_server,
+        network_client_map=network_client_map,
     )
 
     loop = asyncio.get_running_loop()
@@ -91,9 +157,5 @@ async def run() -> None:
             await application.stop()
         with suppress(Exception):
             await application.shutdown()
-        await client.close()
-        if dex_client is not None:
-            with suppress(Exception):
-                await dex_client.close()
-
-
+        with suppress(Exception):
+            await registry.close_all()

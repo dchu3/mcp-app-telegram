@@ -6,7 +6,7 @@ def test_format_gas_stats():
     stats = GasStats(safe=0.5, standard=0.7, fast=0.9, block_lag_seconds=3.2, base_fee=0.6)
     text = format_gas_stats(stats)
     assert "Safe: 0.5000 gwei" in text
-    assert "Sequencer lag: 3.2 s" in text
+    assert "Sequencer lag: 3.2000 s" in text
 
 
 def test_format_transaction():

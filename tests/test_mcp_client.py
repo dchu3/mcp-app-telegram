@@ -94,7 +94,12 @@ async def test_fetch_gas_stats_jsonrpc():
 
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(transport=transport, base_url="http://rpc") as client:
-        mcp = EvmMcpClient("http://rpc", protocol=MCP_PROTOCOL_JSONRPC, client=client)
+        mcp = EvmMcpClient(
+            "http://rpc",
+            protocol=MCP_PROTOCOL_JSONRPC,
+            client=client,
+            rpc_urls={"base": "http://rpc"},
+        )
         stats = await mcp.fetch_gas_stats()
         await mcp.close()
 
@@ -127,7 +132,12 @@ async def test_fetch_transaction_jsonrpc():
 
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(transport=transport, base_url="http://rpc") as client:
-        mcp = EvmMcpClient("http://rpc", protocol=MCP_PROTOCOL_JSONRPC, client=client)
+        mcp = EvmMcpClient(
+            "http://rpc",
+            protocol=MCP_PROTOCOL_JSONRPC,
+            client=client,
+            rpc_urls={"base": "http://rpc"},
+        )
         summary = await mcp.fetch_transaction("0xabc")
         await mcp.close()
 
@@ -205,7 +215,12 @@ async def test_fetch_account_jsonrpc():
 
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(transport=transport, base_url="http://rpc") as client:
-        mcp = EvmMcpClient("http://rpc", protocol=MCP_PROTOCOL_JSONRPC, client=client)
+        mcp = EvmMcpClient(
+            "http://rpc",
+            protocol=MCP_PROTOCOL_JSONRPC,
+            client=client,
+            rpc_urls={"base": "http://rpc"},
+        )
         summary = await mcp.fetch_account("0x456")
         await mcp.close()
 
