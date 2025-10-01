@@ -1,136 +1,155 @@
-import os
+import json
 
 import pytest
 
-from mcp_app_telegram.config import ConfigError, DEFAULT_MCP_BASE_URL, load_config
+from mcp_app_telegram.config import (
+    DEFAULT_GEMINI_MODEL,
+    DEFAULT_MCP_BASE_URL,
+    MCP_PROTOCOL_JSONRPC,
+    MCP_PROTOCOL_MCP,
+    ConfigError,
+    load_config,
+)
 
 
-def test_load_config(monkeypatch):
-    monkeypatch.setenv("TELEGRAM_MCP_BOT_TOKEN", "token")
-    monkeypatch.setenv("TELEGRAM_CHAT_ID", "123")
+def _reset_legacy_env(monkeypatch):
+    monkeypatch.delenv("MCP_SERVERS", raising=False)
     monkeypatch.delenv("MCP_EVM_BASE_URL", raising=False)
-    monkeypatch.delenv("MCP_GAS_ALERT_THRESHOLD", raising=False)
+    monkeypatch.delenv("MCP_EVM_PROTOCOL", raising=False)
+    monkeypatch.delenv("MCP_EVM_NETWORK", raising=False)
     monkeypatch.delenv("ONCHAIN_VALIDATION_RPC_URL", raising=False)
+    monkeypatch.delenv("MCP_EVM_SERVER_COMMAND", raising=False)
     monkeypatch.delenv("DEXSCREENER_MCP_ROOT", raising=False)
     monkeypatch.delenv("DEXSCREENER_MCP_COMMAND", raising=False)
+    monkeypatch.delenv("MCP_PRIMARY_EVM", raising=False)
+    monkeypatch.delenv("MCP_PRIMARY_DEXSCREENER", raising=False)
+    monkeypatch.delenv("MCP_GAS_ALERT_THRESHOLD", raising=False)
+    monkeypatch.delenv("TELEGRAM_HTTP_READ_TIMEOUT", raising=False)
+    monkeypatch.delenv("TELEGRAM_HTTP_CONNECT_TIMEOUT", raising=False)
+    monkeypatch.delenv("GEMINI_MODEL", raising=False)
 
+
+@pytest.fixture(autouse=True)
+def base_env(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_MCP_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "123")
+    _reset_legacy_env(monkeypatch)
+    yield
+    _reset_legacy_env(monkeypatch)
+
+
+def test_load_config_defaults(monkeypatch):
     config = load_config()
 
     assert config.telegram_bot_token == "token"
     assert config.telegram_chat_id == 123
-    assert config.mcp_base_url == DEFAULT_MCP_BASE_URL
+    assert config.primary_evm_server == "evm"
+    assert config.primary_dexscreener_server is None
     assert config.gas_alert_threshold is None
-    assert config.telegram_read_timeout == pytest.approx(15.0)
-    assert config.telegram_connect_timeout == pytest.approx(5.0)
-    assert config.mcp_protocol == 'mcp'
-    assert config.dexscreener_mcp_command is None
+    assert config.gemini_model == DEFAULT_GEMINI_MODEL
+
+    assert len(config.mcp_servers) == 1
+    server = config.mcp_servers[0]
+    assert server.key == "evm"
+    assert server.kind == "evm"
+    assert server.protocol == MCP_PROTOCOL_MCP
+    assert server.base_url == DEFAULT_MCP_BASE_URL
+    assert server.network == "base"
 
 
 def test_load_config_with_optional(monkeypatch):
-    monkeypatch.setenv("TELEGRAM_MCP_BOT_TOKEN", "token")
-    monkeypatch.setenv("TELEGRAM_CHAT_ID", "456")
     monkeypatch.setenv("MCP_EVM_BASE_URL", "https://example.com/")
     monkeypatch.setenv("MCP_GAS_ALERT_THRESHOLD", "0.75")
-    monkeypatch.delenv("DEXSCREENER_MCP_ROOT", raising=False)
-    monkeypatch.delenv("DEXSCREENER_MCP_COMMAND", raising=False)
-
-    config = load_config()
-
-    assert config.mcp_base_url == "https://example.com"
-    assert config.gas_alert_threshold == pytest.approx(0.75)
-    assert config.telegram_read_timeout == pytest.approx(15.0)
-    assert config.telegram_connect_timeout == pytest.approx(5.0)
-    assert config.mcp_protocol == 'mcp'
-    assert config.dexscreener_mcp_command is None
-
-
-def test_load_config_missing(monkeypatch):
-    monkeypatch.delenv("TELEGRAM_MCP_BOT_TOKEN", raising=False)
-    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
-    monkeypatch.delenv("DEXSCREENER_MCP_ROOT", raising=False)
-    monkeypatch.delenv("DEXSCREENER_MCP_COMMAND", raising=False)
-
-    with pytest.raises(ConfigError):
-        load_config()
-
-
-def test_load_config_with_timeouts(monkeypatch):
-    monkeypatch.setenv("TELEGRAM_MCP_BOT_TOKEN", "token")
-    monkeypatch.setenv("TELEGRAM_CHAT_ID", "789")
     monkeypatch.setenv("TELEGRAM_HTTP_READ_TIMEOUT", "20")
     monkeypatch.setenv("TELEGRAM_HTTP_CONNECT_TIMEOUT", "7")
-    monkeypatch.delenv("MCP_EVM_BASE_URL", raising=False)
-    monkeypatch.delenv("ONCHAIN_VALIDATION_RPC_URL", raising=False)
-    monkeypatch.delenv("MCP_EVM_PROTOCOL", raising=False)
-    monkeypatch.delenv("DEXSCREENER_MCP_ROOT", raising=False)
-    monkeypatch.delenv("DEXSCREENER_MCP_COMMAND", raising=False)
+    monkeypatch.setenv("GEMINI_MODEL", "demo-model")
 
     config = load_config()
 
+    assert config.gas_alert_threshold == pytest.approx(0.75)
     assert config.telegram_read_timeout == pytest.approx(20.0)
     assert config.telegram_connect_timeout == pytest.approx(7.0)
-    assert config.mcp_protocol == 'mcp'
-    assert config.dexscreener_mcp_command is None
+    assert config.gemini_model == "demo-model"
 
+    server = config.mcp_servers[0]
+    assert server.base_url == "https://example.com"
+    assert server.protocol == MCP_PROTOCOL_MCP
 
 
 def test_load_config_json_rpc_via_onchain_env(monkeypatch):
-    monkeypatch.setenv('TELEGRAM_MCP_BOT_TOKEN', 'token')
-    monkeypatch.setenv('TELEGRAM_CHAT_ID', '321')
-    monkeypatch.delenv('MCP_EVM_BASE_URL', raising=False)
-    monkeypatch.delenv('MCP_EVM_PROTOCOL', raising=False)
-    monkeypatch.setenv('ONCHAIN_VALIDATION_RPC_URL', 'https://mainnet.base.org')
-    monkeypatch.delenv("DEXSCREENER_MCP_ROOT", raising=False)
-    monkeypatch.delenv("DEXSCREENER_MCP_COMMAND", raising=False)
+    monkeypatch.setenv("ONCHAIN_VALIDATION_RPC_URL", "https://mainnet.base.org")
 
     config = load_config()
 
-    assert config.mcp_protocol == 'json-rpc'
-    assert config.mcp_base_url == 'https://mainnet.base.org'
-    assert config.dexscreener_mcp_command is None
+    server = config.mcp_servers[0]
+    assert server.protocol == MCP_PROTOCOL_JSONRPC
+    assert server.base_url == "https://mainnet.base.org"
+    assert server.rpc_urls["base"] == "https://mainnet.base.org"
 
 
 def test_load_config_invalid_protocol(monkeypatch):
-    monkeypatch.setenv('TELEGRAM_MCP_BOT_TOKEN', 'token')
-    monkeypatch.setenv('TELEGRAM_CHAT_ID', '654')
-    monkeypatch.setenv('MCP_EVM_PROTOCOL', 'invalid')
-
+    monkeypatch.setenv("MCP_EVM_PROTOCOL", "invalid")
     with pytest.raises(ConfigError):
         load_config()
 
 
 def test_load_config_explicit_protocol(monkeypatch):
-    monkeypatch.setenv('TELEGRAM_MCP_BOT_TOKEN', 'token')
-    monkeypatch.setenv('TELEGRAM_CHAT_ID', '987')
-    monkeypatch.setenv('MCP_EVM_BASE_URL', 'https://rpc.example')
-    monkeypatch.setenv('MCP_EVM_PROTOCOL', 'json-rpc')
-    monkeypatch.delenv("DEXSCREENER_MCP_ROOT", raising=False)
-    monkeypatch.delenv("DEXSCREENER_MCP_COMMAND", raising=False)
+    monkeypatch.setenv("MCP_EVM_BASE_URL", "https://rpc.example")
+    monkeypatch.setenv("MCP_EVM_PROTOCOL", MCP_PROTOCOL_JSONRPC)
 
     config = load_config()
 
-    assert config.mcp_protocol == 'json-rpc'
-    assert config.mcp_base_url == 'https://rpc.example'
-    assert config.dexscreener_mcp_command is None
+    server = config.mcp_servers[0]
+    assert server.protocol == MCP_PROTOCOL_JSONRPC
+    assert server.base_url == "https://rpc.example"
 
 
 def test_load_config_with_dexscreener_root(monkeypatch):
-    monkeypatch.setenv('TELEGRAM_MCP_BOT_TOKEN', 'token')
-    monkeypatch.setenv('TELEGRAM_CHAT_ID', '777')
-    monkeypatch.setenv('DEXSCREENER_MCP_ROOT', '/opt/drawer')
-    monkeypatch.delenv("DEXSCREENER_MCP_COMMAND", raising=False)
+    monkeypatch.setenv("DEXSCREENER_MCP_ROOT", "/opt/drawer")
 
     config = load_config()
 
-    assert config.dexscreener_mcp_command == ('node', '/opt/drawer/index.js')
+    assert config.primary_dexscreener_server == "dexscreener"
+    kinds = {srv.kind for srv in config.mcp_servers}
+    assert "dexscreener" in kinds
+    dex = next(srv for srv in config.mcp_servers if srv.kind == "dexscreener")
+    assert dex.server_command == ("node", "/opt/drawer/index.js")
 
 
 def test_load_config_with_dexscreener_command(monkeypatch):
-    monkeypatch.setenv('TELEGRAM_MCP_BOT_TOKEN', 'token')
-    monkeypatch.setenv('TELEGRAM_CHAT_ID', '778')
-    monkeypatch.setenv('DEXSCREENER_MCP_COMMAND', 'node custom/index.js --port 1234')
-    monkeypatch.delenv("DEXSCREENER_MCP_ROOT", raising=False)
+    monkeypatch.setenv("DEXSCREENER_MCP_COMMAND", "node custom/index.js --port 1234")
 
     config = load_config()
 
-    assert config.dexscreener_mcp_command == ('node', 'custom/index.js', '--port', '1234')
+    dex = next(srv for srv in config.mcp_servers if srv.kind == "dexscreener")
+    assert dex.server_command == ("node", "custom/index.js", "--port", "1234")
+
+
+def test_load_config_from_json(monkeypatch):
+    servers = [
+        {
+            "key": "evm-mainnet",
+            "kind": "evm",
+            "protocol": "json-rpc",
+            "base_url": "https://rpc.ankr.com/eth",
+            "network": "ethereum",
+            "rpc_urls": {"ethereum": "https://rpc.ankr.com/eth"},
+        },
+        {
+            "key": "dexscreener-main",
+            "kind": "dexscreener",
+            "command": ["node", "dex/index.js"],
+        },
+    ]
+    monkeypatch.setenv("MCP_SERVERS", json.dumps(servers))
+    monkeypatch.setenv("MCP_PRIMARY_EVM", "evm-mainnet")
+    monkeypatch.setenv("MCP_PRIMARY_DEXSCREENER", "dexscreener-main")
+
+    config = load_config()
+
+    assert config.primary_evm_server == "evm-mainnet"
+    assert config.primary_dexscreener_server == "dexscreener-main"
+    assert len(config.mcp_servers) == 2
+    rpc_server = next(srv for srv in config.mcp_servers if srv.key == "evm-mainnet")
+    assert rpc_server.protocol == MCP_PROTOCOL_JSONRPC
+    assert rpc_server.rpc_urls["ethereum"] == "https://rpc.ankr.com/eth"

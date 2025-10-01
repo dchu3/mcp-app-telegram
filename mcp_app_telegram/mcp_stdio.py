@@ -167,7 +167,7 @@ class McpStdioClient:
 
     async def call_tool(self, name: str, arguments: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
         params: Dict[str, Any] = {"name": name}
-        if arguments:
+        if arguments is not None:
             params["arguments"] = dict(arguments)
         return await self.request("tools/call", params)
 

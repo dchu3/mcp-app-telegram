@@ -3,15 +3,40 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mcp_app_telegram.bot import _handle_account, _handle_ask, _handle_gas, _handle_help
-from mcp_app_telegram.bot import TELEGRAM_COMMANDS
-from mcp_app_telegram.mcp_client import AccountSummary, GasStats
+from mcp_app_telegram.bot import (
+    _handle_account,
+    _handle_gas,
+    _handle_help,
+    _handle_text_query,
+    TELEGRAM_COMMANDS,
+)
+from mcp_app_telegram.mcp_client import AccountSummary, EvmMcpClient, GasStats
+from mcp_app_telegram.mcp.manager import McpClientRegistry
+
+
+class StubEvmClient(EvmMcpClient):
+    def __init__(self) -> None:
+        # Bypass parent initialisation since tests stub methods directly.
+        # pylint: disable=super-init-not-called
+        self.fetch_account = AsyncMock()
+        self.fetch_gas_stats = AsyncMock()
+
+
+def build_bot_data(client: StubEvmClient) -> dict:
+    registry = McpClientRegistry()
+    registry.register("evm", client)  # type: ignore[arg-type]
+    return {
+        "mcp_registry": registry,
+        "primary_evm_key": "evm",
+        "network_client_map": {"base": "evm"},
+    }
 
 
 
 class DummyMessage:
-    def __init__(self) -> None:
+    def __init__(self, text: str = "") -> None:
         self.replies = []
+        self.text = text
 
     async def reply_text(self, text, reply_markup=None):
         self.replies.append((text, reply_markup))
@@ -47,8 +72,9 @@ async def test_handle_account_success():
 
     message = DummyMessage()
     update = SimpleNamespace(effective_message=message, effective_chat=SimpleNamespace(id=1))
-    mcp_client = SimpleNamespace(fetch_account=AsyncMock(return_value=summary))
-    context = DummyContext(args=[address], bot_data={"mcp_client": mcp_client})
+    mcp_client = StubEvmClient()
+    mcp_client.fetch_account.return_value = summary
+    context = DummyContext(args=[address], bot_data=build_bot_data(mcp_client))
 
     await _handle_account(update, context)
 
@@ -63,8 +89,9 @@ async def test_handle_gas_reports_stats():
     message = DummyMessage()
     update = SimpleNamespace(effective_message=message, effective_chat=SimpleNamespace(id=1))
     stats = GasStats(safe=0.5, standard=0.7, fast=1.1, block_lag_seconds=2.0, base_fee=0.6)
-    mcp_client = SimpleNamespace(fetch_gas_stats=AsyncMock(return_value=stats))
-    context = DummyContext(args=[], bot_data={"mcp_client": mcp_client})
+    mcp_client = StubEvmClient()
+    mcp_client.fetch_gas_stats.return_value = stats
+    context = DummyContext(args=[], bot_data=build_bot_data(mcp_client))
 
     await _handle_gas(update, context)
 
@@ -85,50 +112,49 @@ async def test_handle_help_outputs_summary():
 
     assert message.replies
     help_text, _ = message.replies[0]
-    assert "/ask" in help_text
+    assert "Send a normal message" in help_text
     assert "/gas" in help_text
     assert "/account" in help_text
-    assert "\n- /gas_clear" in help_text
+    assert "\n- /cleargasalerts" in help_text
 
 
 @pytest.mark.asyncio
-async def test_handle_ask_requires_question():
-    message = DummyMessage()
+async def test_handle_text_query_requires_agent():
+    message = DummyMessage("What is gas?")
     update = SimpleNamespace(effective_message=message, effective_chat=SimpleNamespace(id=1))
     context = DummyContext(args=[], bot_data={})
 
-    await _handle_ask(update, context)
-
-    assert message.replies
-    assert "Usage" in message.replies[0][0]
-
-
-@pytest.mark.asyncio
-async def test_handle_ask_requires_agent():
-    message = DummyMessage()
-    update = SimpleNamespace(effective_message=message, effective_chat=SimpleNamespace(id=1))
-    context = DummyContext(args=["what", "are", "gas", "fees"], bot_data={})
-
-    await _handle_ask(update, context)
+    await _handle_text_query(update, context)
 
     assert message.replies
     assert "GEMINI_API_KEY" in message.replies[0][0]
 
 
 @pytest.mark.asyncio
-async def test_handle_ask_success():
-    message = DummyMessage()
+async def test_handle_text_query_success():
+    message = DummyMessage("hello")
     update = SimpleNamespace(effective_message=message, effective_chat=SimpleNamespace(id=1))
-    agent = SimpleNamespace(answer=AsyncMock(return_value="hello"))
-    context = DummyContext(args=["hello"], bot_data={"agent": agent})
+    agent = SimpleNamespace(answer=AsyncMock(return_value="hi there"))
+    bot_data = build_bot_data(StubEvmClient())
+    bot_data["agent"] = agent
+    context = DummyContext(args=[], bot_data=bot_data)
 
-    await _handle_ask(update, context)
+    await _handle_text_query(update, context)
 
     agent.answer.assert_awaited_once_with("hello")
     assert message.replies
-    assert message.replies[0][0] == "hello"
+    assert message.replies[0][0] == "hi there"
 
 
 def test_commands_registered():
     names = {cmd.command for cmd in TELEGRAM_COMMANDS}
-    assert {"help", "ask", "gas", "account", "tx", "gas_sub", "gas_sub_above", "gas_clear"}.issubset(names)
+    assert {
+        "help",
+        "gas",
+        "account",
+        "transaction",
+        "gasalert",
+        "gasalertabove",
+        "cleargasalerts",
+        "gasalerts",
+    }.issubset(names)

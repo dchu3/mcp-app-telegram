@@ -1,14 +1,7 @@
-"""Backward-compatible re-exports for MCP client classes.
+"""MCP client integrations and shared data structures."""
 
-This module will be removed once downstream imports migrate to ``mcp_app_telegram.mcp``.
-"""
-
-from __future__ import annotations
-
-from .mcp import (
+from .base import (
     AccountSummary,
-    DexscreenerMcpClient,
-    EvmMcpClient,
     GasStats,
     McpClient,
     McpClientError,
@@ -16,6 +9,8 @@ from .mcp import (
     ToolClient,
     TransactionSummary,
 )
+from .dexscreener_client import DexscreenerMcpClient
+from .evm_client import EvmMcpClient
 
 __all__ = [
     "AccountSummary",
