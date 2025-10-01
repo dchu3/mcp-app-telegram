@@ -49,6 +49,7 @@ class Config:
     telegram_connect_timeout: float
     gemini_api_key: Optional[str]
     gemini_model: str
+    gemini_persona: str
     mcp_servers: Tuple[McpServerConfig, ...]
     primary_evm_server: str
     primary_dexscreener_server: Optional[str]
@@ -216,10 +217,9 @@ def _build_legacy_servers() -> Tuple[McpServerConfig, ...]:
         if coingecko_api_key:
             env["COINGECKO_PRO_API_KEY"] = coingecko_api_key
         environment = os.getenv("COINGECKO_ENVIRONMENT")
-        if environment:
-            env["COINGECKO_ENVIRONMENT"] = environment
-        elif coingecko_api_key:
-            env["COINGECKO_ENVIRONMENT"] = "pro"
+        if not environment:
+            environment = "demo"
+        env["COINGECKO_ENVIRONMENT"] = environment
         servers.append(
             McpServerConfig(
                 key="coingecko",
@@ -282,6 +282,10 @@ def load_config() -> Config:
 
     gemini_api_key = os.getenv("GEMINI_API_KEY")
     gemini_model = os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip() or DEFAULT_GEMINI_MODEL
+    gemini_persona = (
+        os.getenv("GEMINI_PERSONA")
+        or "You are an on-chain analyst for the Base network. Be concise, factual, and focus on actionable network and market data."
+    ).strip()
 
     return Config(
         telegram_bot_token=token,
@@ -291,6 +295,7 @@ def load_config() -> Config:
         telegram_connect_timeout=float(os.getenv("TELEGRAM_HTTP_CONNECT_TIMEOUT", 5.0)),
         gemini_api_key=gemini_api_key,
         gemini_model=gemini_model,
+        gemini_persona=gemini_persona,
         mcp_servers=servers,
         primary_evm_server=primary_evm,
         primary_dexscreener_server=primary_dex,

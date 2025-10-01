@@ -136,7 +136,7 @@ def test_load_config_with_coingecko(monkeypatch):
     coingecko = next(srv for srv in config.mcp_servers if srv.kind == "coingecko")
     assert coingecko.server_command == ("npx", "-y", "@coingecko/coingecko-mcp")
     assert coingecko.env.get("COINGECKO_PRO_API_KEY") == "abc123"
-    assert coingecko.env.get("COINGECKO_ENVIRONMENT") == "pro"
+    assert coingecko.env.get("COINGECKO_ENVIRONMENT") == "demo"
 
 
 def test_load_config_from_json(monkeypatch):

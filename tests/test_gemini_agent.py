@@ -203,6 +203,20 @@ async def test_build_coingecko_tool_definitions_runs_handler():
     assert "Bitcoin" in output
 
 
+@pytest.mark.asyncio
+async def test_persona_in_prompt():
+    gas_stats = GasStats(safe=0.5, standard=0.7, fast=1.1, block_lag_seconds=2.0, base_fee=0.6)
+    client = StubEvmClient()
+    client.fetch_gas_stats.return_value = gas_stats
+    llm = FakeLLM(['{"tool": null, "arguments": {}, "reply": "hi"}'])
+    persona = "You are a friendly Base network analyst."
+    agent = build_agent(client, llm, persona=persona)
+
+    await agent.answer("hello")
+
+    assert any(persona in prompt for prompt in llm.prompts)
+
+
 def test_format_dexscreener_pairs_handles_empty():
     from mcp_app_telegram.formatting import format_dexscreener_pairs
 
@@ -278,7 +292,7 @@ class StubEvmClient(EvmMcpClient):
         self.fetch_transaction = AsyncMock()
 
 
-def build_agent(client: StubEvmClient, llm: FakeLLM) -> GeminiAgent:
+def build_agent(client: StubEvmClient, llm: FakeLLM, *, persona: str | None = None) -> GeminiAgent:
     registry = McpClientRegistry()
     registry.register("evm", client)
-    return GeminiAgent(registry, "evm", llm=llm)
+    return GeminiAgent(registry, "evm", llm=llm, persona=persona or "")

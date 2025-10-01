@@ -63,7 +63,7 @@ if [ "${SKIP_LOCAL_COINGECKO_MCP:-0}" != "1" ]; then
     else
       echo "Starting Coingecko MCP server..."
       env COINGECKO_PRO_API_KEY="$COINGECKO_KEY" \
-          COINGECKO_ENVIRONMENT="${COINGECKO_ENVIRONMENT:-pro}" \
+          COINGECKO_ENVIRONMENT="${COINGECKO_ENVIRONMENT:-demo}" \
           npx -y @coingecko/coingecko-mcp >/tmp/coingecko-mcp.log 2>&1 &
       CG_MCP_PID=$!
       sleep 1

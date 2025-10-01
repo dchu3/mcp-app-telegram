@@ -80,6 +80,7 @@ class GeminiAgent:
         api_key: Optional[str] = None,
         *,
         model: str = DEFAULT_GEMINI_MODEL,
+        persona: str = "",
         llm: Optional["_GeminiModelWrapper"] = None,
         tools: Optional[Sequence[ToolDefinition]] = None,
     ) -> None:
@@ -89,6 +90,7 @@ class GeminiAgent:
         self._primary_evm_key = primary_evm_key
         self._evm_client = registry.require_typed(primary_evm_key, EvmMcpClient)
         self._llm = llm or _GeminiModelWrapper(api_key or "", model=model)
+        self._persona = persona.strip()
         self._tool_definitions: List[ToolDefinition] = list(tools or self._default_tool_definitions())
         self._tool_handlers: Dict[str, Callable[[Mapping[str, Any]], Awaitable[str]]] = {
             tool.name: tool.handler for tool in self._tool_definitions
@@ -187,8 +189,9 @@ class GeminiAgent:
             tool_lines.append(f"- {tool.name}: {tool.description} Arguments: {args_text}")
 
         tools_block = "\n".join(tool_lines)
+        persona = self._persona or "You are an assistant embedded in a Telegram bot for Base network data. Be concise, factual, and recommend relevant on-chain or market insights."
         prompt = (
-            "You are an assistant embedded in a Telegram bot for Base network data. "
+            f"{persona}\n"
             "You can optionally invoke at most one tool to satisfy the user's question.\n"
             "Tools available:\n"
             f"{tools_block}\n"
