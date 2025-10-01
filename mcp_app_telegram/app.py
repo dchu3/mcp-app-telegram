@@ -17,9 +17,11 @@ from .gemini_agent import (
     build_dexscreener_tool_definitions,
 )
 from .mcp_client import DexscreenerMcpClient, EvmMcpClient
+from .database import initialize_database
 
 
 async def run() -> None:
+    initialize_database()
     logging.basicConfig(level=logging.INFO)
     try:
         config = load_config()
@@ -32,6 +34,7 @@ async def run() -> None:
         protocol=config.mcp_protocol,
         command=config.mcp_server_command,
         network=config.mcp_network,
+        rpc_urls={"base": config.mcp_base_url},
     )
     await client.start()
     dex_client: Optional[DexscreenerMcpClient] = None
@@ -94,9 +97,3 @@ async def run() -> None:
                 await dex_client.close()
 
 
-def main() -> None:
-    asyncio.run(run())
-
-
-if __name__ == "__main__":  # pragma: no cover - module entrypoint
-    main()

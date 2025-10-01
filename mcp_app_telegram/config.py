@@ -13,6 +13,12 @@ MCP_PROTOCOL_JSONRPC = "json-rpc"
 DEFAULT_MCP_BASE_URL: Final[str] = "http://localhost:8080"
 DEFAULT_GEMINI_MODEL: Final[str] = "gemini-1.5-flash-latest"
 
+# A Base RPC endpoint is required for on-chain validation
+ONCHAIN_VALIDATION_RPC_URL = os.environ.get("ONCHAIN_VALIDATION_RPC_URL", "https://mainnet.base.org")
+
+# The path to the SQLite database file
+DATABASE_FILE = os.environ.get("DATABASE_FILE", "gas_alerts.db")
+
 
 class ConfigError(RuntimeError):
     """Raised when required environment configuration is missing."""

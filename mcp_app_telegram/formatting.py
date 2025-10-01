@@ -36,7 +36,7 @@ def format_gas_stats(stats: GasStats) -> str:
         f"Safe: {_format_gwei(stats.safe)} gwei",
         f"Standard: {_format_gwei(stats.standard)} gwei",
         f"Fast: {_format_gwei(stats.fast)} gwei",
-        f"Sequencer lag: {stats.block_lag_seconds:.1f} s",
+        f"Sequencer lag: {stats.block_lag_seconds:.4f} s",
         f"Base fee: {_format_gwei(stats.base_fee)} gwei",
     ]
     return "\n".join(lines)

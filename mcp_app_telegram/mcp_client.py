@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass
 from time import time
 from typing import Any, Dict, List, Mapping, Optional, Sequence
+from datetime import datetime, timezone
 
 import httpx
 
@@ -63,6 +64,7 @@ class EvmMcpClient:
         client: Optional[httpx.AsyncClient] = None,
         command: Optional[Sequence[str]] = None,
         network: str = "base",
+        rpc_urls: Optional[Dict[str, str]] = None,
     ) -> None:
         self._owns_client = client is None
         self._client = client or httpx.AsyncClient(base_url=base_url, timeout=10.0)
@@ -72,6 +74,7 @@ class EvmMcpClient:
         self._network = network
         self._stdio_client: Optional[McpStdioClient] = None
         self._stdio_command = tuple(command) if command else ("npx", "-y", "@mcpdotdirect/evm-mcp-server")
+        self._rpc_urls = rpc_urls or {}
 
     async def close(self) -> None:
         if self._protocol == MCP_PROTOCOL_MCP and self._stdio_client is not None:
@@ -89,10 +92,10 @@ class EvmMcpClient:
         result = await self._stdio_client.call_tool(method, params or {})
         return result
 
-    async def fetch_gas_stats(self) -> GasStats:
+    async def fetch_gas_stats(self, network: Optional[str] = None) -> GasStats:
         if self._protocol == MCP_PROTOCOL_JSONRPC:
-            return await self._fetch_gas_stats_jsonrpc()
-        return await self._fetch_gas_stats_mcp()
+            return await self._fetch_gas_stats_jsonrpc(network)
+        return await self._fetch_gas_stats_mcp(network)
 
     async def fetch_transaction(self, tx_hash: str) -> TransactionSummary:
         if self._protocol == MCP_PROTOCOL_JSONRPC:
@@ -109,7 +112,7 @@ class EvmMcpClient:
             return
         await self._ensure_stdio()
 
-    async def _json_rpc(self, method: str, params: Optional[List[Any]] = None) -> Any:
+    async def _json_rpc(self, method: str, params: Optional[List[Any]] = None, network: Optional[str] = None) -> Any:
         self._rpc_id += 1
         payload = {
             "jsonrpc": "2.0",
@@ -117,20 +120,29 @@ class EvmMcpClient:
             "params": params or [],
             "id": self._rpc_id,
         }
-        response = await self._client.post(self._endpoint, json=payload)
+        
+        url = self._endpoint
+        if self._protocol == MCP_PROTOCOL_JSONRPC:
+            network = network or self._network
+            if network in self._rpc_urls:
+                url = self._rpc_urls[network]
+            else:
+                raise McpClientError(f"No RPC URL configured for network: {network}")
+
+        response = await self._client.post(url, json=payload)
         response.raise_for_status()
         data = response.json()
         if "error" in data:
             raise McpClientError(str(data["error"]))
         return data.get("result")
 
-    async def _fetch_gas_stats_jsonrpc(self) -> GasStats:
-        gas_price_hex = await self._json_rpc("eth_gasPrice")
+    async def _fetch_gas_stats_jsonrpc(self, network: Optional[str] = None) -> GasStats:
+        gas_price_hex = await self._json_rpc("eth_gasPrice", network=network)
         if gas_price_hex is None:
             raise McpClientError("eth_gasPrice returned no result")
         gas_price_wei = int(gas_price_hex, 16)
 
-        block = await self._json_rpc("eth_getBlockByNumber", ["latest", False])
+        block = await self._json_rpc("eth_getBlockByNumber", ["latest", False], network=network)
         if block is None:
             raise McpClientError("Failed to load latest block")
 
@@ -139,7 +151,7 @@ class EvmMcpClient:
         block_timestamp_hex = block.get("timestamp") or "0x0"
         block_timestamp = int(block_timestamp_hex, 16)
 
-        current_time = time()
+        current_time = datetime.now(timezone.utc).timestamp()
         block_lag = max(0.0, current_time - block_timestamp)
 
         gas_price_gwei = gas_price_wei / 1_000_000_000
@@ -241,10 +253,11 @@ class EvmMcpClient:
                     continue
         raise McpClientError(f"Tool {name} did not return JSON content")
 
-    async def _fetch_gas_stats_mcp(self) -> GasStats:
+    async def _fetch_gas_stats_mcp(self, network: Optional[str] = None) -> GasStats:
+        network = network or self._network
         block = await self._call_tool_json(
             "get_latest_block",
-            {"network": self._network},
+            {"network": network},
         )
         base_fee_hex = str(block.get("baseFeePerGas") or "0x0")
         base_fee_wei = int(base_fee_hex, 16)
@@ -252,11 +265,12 @@ class EvmMcpClient:
 
         timestamp_hex = str(block.get("timestamp") or "0x0")
         try:
-            block_timestamp = int(timestamp_hex, 16)
+            block_timestamp = int(timestamp_hex)
         except ValueError:
             block_timestamp = 0
-        block_lag = max(0.0, time() - block_timestamp) if block_timestamp else 0.0
+        block_lag = max(0.0, datetime.now(timezone.utc).timestamp() - block_timestamp) if block_timestamp else 0.0
 
+        # Heuristic tiers derived from the latest base fee.
         safe = max(base_fee_gwei * 1.05, base_fee_gwei)
         standard = max(base_fee_gwei * 1.15, base_fee_gwei)
         fast = max(base_fee_gwei * 1.25, base_fee_gwei)
@@ -311,11 +325,7 @@ class EvmMcpClient:
             {"address": address, "network": self._network},
         )
 
-        balance_wei = (
-            int(balance.get("wei", 0))
-            if isinstance(balance.get("wei"), str)
-            else int(balance.get("wei", 0) or 0)
-        )
+        balance_wei = int(balance.get("wei", 0)) if isinstance(balance.get("wei"), str) else int(balance.get("wei", 0) or 0)
 
         nonce = await self._fetch_nonce_via_rpc(address)
 
@@ -341,7 +351,7 @@ class EvmMcpClient:
                 "params": [address, "latest"],
                 "id": 1,
             }
-            response = await client.post(rpc_url, json=payload)
+            response = await client.post(str(rpc_url), json=payload)
             response.raise_for_status()
             data = response.json()
             result = data.get("result")
@@ -455,144 +465,3 @@ class DexscreenerMcpClient:
             return dict(tool_result)
 
         return None
-
-    async def _ensure_stdio(self) -> None:
-        if self._protocol != MCP_PROTOCOL_MCP:
-            return
-        if self._stdio_client is not None:
-            return
-        client = McpStdioClient(self._stdio_command)
-        await client.start()
-        self._stdio_client = client
-
-    async def _call_tool_json(self, name: str, arguments: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
-        await self._ensure_stdio()
-        if self._stdio_client is None:
-            raise McpClientError("MCP stdio client not running")
-        try:
-            result = await self._stdio_client.call_tool(name, arguments or {})
-        except McpStdioError as exc:
-            raise McpClientError(str(exc)) from exc
-        if result.get("isError"):
-            raise McpClientError(f"MCP tool {name} reported error")
-        content = result.get("content")
-        if not isinstance(content, list):
-            tool_result = result.get("toolResult")
-            if isinstance(tool_result, Mapping):
-                return dict(tool_result)
-            raise McpClientError(f"Invalid MCP tool response from {name}: {result!r}")
-        for item in content:
-            if isinstance(item, Mapping) and item.get("type") == "text":
-                text = item.get("text", "")
-                if not isinstance(text, str):
-                    continue
-                try:
-                    return json.loads(text)
-                except json.JSONDecodeError:
-                    continue
-        raise McpClientError(f"Tool {name} did not return JSON content")
-
-    async def _fetch_gas_stats_mcp(self) -> GasStats:
-        block = await self._call_tool_json(
-            "get_latest_block",
-            {"network": self._network},
-        )
-        base_fee_hex = str(block.get("baseFeePerGas") or "0x0")
-        base_fee_wei = int(base_fee_hex, 16)
-        base_fee_gwei = base_fee_wei / 1_000_000_000 if base_fee_wei else 0.0
-
-        timestamp_hex = str(block.get("timestamp") or "0x0")
-        try:
-            block_timestamp = int(timestamp_hex, 16)
-        except ValueError:
-            block_timestamp = 0
-        block_lag = max(0.0, time() - block_timestamp) if block_timestamp else 0.0
-
-        # Heuristic tiers derived from the latest base fee.
-        safe = max(base_fee_gwei * 1.05, base_fee_gwei)
-        standard = max(base_fee_gwei * 1.15, base_fee_gwei)
-        fast = max(base_fee_gwei * 1.25, base_fee_gwei)
-
-        return GasStats(
-            safe=safe,
-            standard=standard,
-            fast=fast,
-            block_lag_seconds=block_lag,
-            base_fee=base_fee_gwei,
-        )
-
-    async def _fetch_transaction_mcp(self, tx_hash: str) -> TransactionSummary:
-        tx = await self._call_tool_json(
-            "get_transaction",
-            {"txHash": tx_hash, "network": self._network},
-        )
-
-        receipt = await self._call_tool_json(
-            "get_transaction_receipt",
-            {"txHash": tx_hash, "network": self._network},
-        )
-
-        status_hex = str(receipt.get("status") or "0x0")
-        status = "success" if int(status_hex, 16) == 1 else "failed"
-        gas_used = receipt.get("gasUsed")
-        gas_used_int = int(gas_used, 16) if isinstance(gas_used, str) else None
-
-        nonce_hex = tx.get("nonce")
-        nonce = int(nonce_hex, 16) if isinstance(nonce_hex, str) else None
-
-        value_hex = tx.get("value")
-        value_wei = int(value_hex, 16) if isinstance(value_hex, str) else None
-
-        return TransactionSummary(
-            hash=tx.get("hash", tx_hash),
-            status=status,
-            from_address=tx.get("from"),
-            to_address=tx.get("to"),
-            gas_used=gas_used_int,
-            nonce=nonce,
-            value_wei=value_wei,
-        )
-
-    async def _fetch_account_mcp(self, address: str) -> AccountSummary:
-        balance = await self._call_tool_json(
-            "get_balance",
-            {"address": address, "network": self._network},
-        )
-        is_contract_info = await self._call_tool_json(
-            "is_contract",
-            {"address": address, "network": self._network},
-        )
-
-        balance_wei = int(balance.get("wei", 0)) if isinstance(balance.get("wei"), str) else int(balance.get("wei", 0) or 0)
-
-        nonce = await self._fetch_nonce_via_rpc(address)
-
-        return AccountSummary(
-            address=balance.get("address", address),
-            balance_wei=balance_wei,
-            nonce=nonce,
-            is_contract=bool(is_contract_info.get("isContract")),
-        )
-
-    async def _fetch_nonce_via_rpc(self, address: str) -> int:
-        try:
-            info = await self._call_tool_json("get_chain_info", {"network": self._network})
-        except McpClientError:
-            info = {}
-        rpc_url = info.get("rpcUrl") if isinstance(info, Mapping) else None
-        if not rpc_url:
-            return 0
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            payload = {
-                "jsonrpc": "2.0",
-                "method": "eth_getTransactionCount",
-                "params": [address, "latest"],
-                "id": 1,
-            }
-            response = await client.post(str(rpc_url), json=payload)
-            response.raise_for_status()
-            data = response.json()
-            result = data.get("result")
-            if isinstance(result, str):
-                return int(result, 16)
-        return 0
