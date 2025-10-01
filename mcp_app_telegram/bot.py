@@ -21,6 +21,7 @@ from .alerts import GasAlertManager, GasAlertSubscription
 from .config import Config
 from .formatting import format_account, format_gas_stats, format_transaction
 from .gemini_agent import GeminiAgent, GeminiAgentError
+from .database import get_distinct_networks_with_alerts
 from .mcp_client import DexscreenerMcpClient, EvmMcpClient, McpClientError
 
 _LOGGER = logging.getLogger(__name__)
@@ -36,6 +37,7 @@ TELEGRAM_COMMANDS = [
     BotCommand("gas_sub", "Alert when fast gas drops below threshold"),
     BotCommand("gas_sub_above", "Alert when fast gas rises above threshold"),
     BotCommand("gas_clear", "Clear gas alerts for this chat"),
+    BotCommand("list_gas_alerts", "List active gas alerts for this chat"),
 ]
 
 
@@ -184,11 +186,12 @@ async def _handle_account(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def _handle_subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE, direction: str) -> None:
-    if not context.args:
-        await update.effective_message.reply_text("Usage: /gas_sub <threshold_gwei>")
+    if len(context.args) != 2:
+        await update.effective_message.reply_text("Usage: /gas_sub <network> <threshold_gwei>")
         return
+    network = context.args[0]
     try:
-        threshold = float(context.args[0])
+        threshold = float(context.args[1])
     except ValueError:
         await update.effective_message.reply_text("Threshold must be a number.")
         return
@@ -196,6 +199,7 @@ async def _handle_subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     alert_manager: GasAlertManager = context.application.bot_data["alert_manager"]
     subscription = GasAlertSubscription(
         chat_id=update.effective_chat.id,
+        network=network,
         threshold=threshold,
         direction=direction,
     )
@@ -211,39 +215,46 @@ async def _handle_clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.effective_message.reply_text("Cleared gas alert subscriptions for this chat.")
 
 
+async def _handle_list_gas_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    alert_manager: GasAlertManager = context.application.bot_data["alert_manager"]
+    subscriptions = await alert_manager.list_subscriptions(update.effective_chat.id)
+    if not subscriptions:
+        await update.effective_message.reply_text("No active gas alerts for this chat.")
+        return
+
+    message = "Active gas alerts:\n"
+    for sub in subscriptions:
+        message += f"- {sub.describe()}\n"
+    await update.effective_message.reply_text(message)
+
+
 async def gas_monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     client: EvmMcpClient = context.bot_data["mcp_client"]
     alert_manager: GasAlertManager = context.bot_data["alert_manager"]
-    config: Config = context.bot_data["config"]
 
-    try:
-        stats = await client.fetch_gas_stats()
-    except Exception as exc:  # pragma: no cover
-        _LOGGER.warning("Skipping alert evaluation due to MCP error: %s", exc)
-        return
+    networks = get_distinct_networks_with_alerts()
 
-    matches = await alert_manager.evaluate(stats)
-    if config.gas_alert_threshold is not None and stats.fast <= config.gas_alert_threshold:
-        matches = tuple(matches) + (
-            GasAlertSubscription(
-                chat_id=config.telegram_chat_id,
-                threshold=config.gas_alert_threshold,
-                direction="below",
-            ),
-        )
-
-    if not matches:
-        return
-
-    message = format_gas_stats(stats)
-    for subscription in matches:
+    for network in networks:
         try:
-            await context.bot.send_message(
-                chat_id=subscription.chat_id,
-                text=f"Gas alert triggered ({subscription.describe()}):\n{message}",
-            )
+            stats = await client.fetch_gas_stats(network)
         except Exception as exc:  # pragma: no cover
-            _LOGGER.warning("Failed to send alert to %s: %s", subscription.chat_id, exc)
+            _LOGGER.warning("Skipping alert evaluation for %s due to MCP error: %s", network, exc)
+            continue
+
+        matches = await alert_manager.evaluate(network, stats)
+
+        if not matches:
+            continue
+
+        message = format_gas_stats(stats)
+        for subscription in matches:
+            try:
+                await context.bot.send_message(
+                    chat_id=subscription.chat_id,
+                    text=f"Gas alert triggered ({subscription.describe()}):\n{message}",
+                )
+            except Exception as exc:  # pragma: no cover
+                _LOGGER.warning("Failed to send alert to %s: %s", subscription.chat_id, exc)
 
 
 def build_application(
@@ -287,6 +298,7 @@ def build_application(
     application.add_handler(CommandHandler("gas_sub", partial(_handle_subscribe, direction="below")))
     application.add_handler(CommandHandler("gas_sub_above", partial(_handle_subscribe, direction="above")))
     application.add_handler(CommandHandler("gas_clear", _handle_clear))
+    application.add_handler(CommandHandler("list_gas_alerts", _handle_list_gas_alerts))
     application.add_handler(CallbackQueryHandler(_handle_gas_refresh, pattern=f"^{REFRESH_QUERY}$"))
 
     if application.job_queue is None:

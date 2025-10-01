@@ -1,7 +1,8 @@
 """Allow running the package as a module."""
 
-from .app import main
+import asyncio
+from .app import run
 
 
 if __name__ == "__main__":  # pragma: no cover - module entrypoint
-    main()
+    asyncio.run(run())
