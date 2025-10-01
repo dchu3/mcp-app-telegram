@@ -21,6 +21,10 @@ def _reset_legacy_env(monkeypatch):
     monkeypatch.delenv("MCP_EVM_SERVER_COMMAND", raising=False)
     monkeypatch.delenv("DEXSCREENER_MCP_ROOT", raising=False)
     monkeypatch.delenv("DEXSCREENER_MCP_COMMAND", raising=False)
+    monkeypatch.delenv("COINGECKO_MCP_COMMAND", raising=False)
+    monkeypatch.delenv("COINGECKO_PRO_API_KEY", raising=False)
+    monkeypatch.delenv("COINGECKO_API_KEY", raising=False)
+    monkeypatch.delenv("COINGECKO_ENVIRONMENT", raising=False)
     monkeypatch.delenv("MCP_PRIMARY_EVM", raising=False)
     monkeypatch.delenv("MCP_PRIMARY_DEXSCREENER", raising=False)
     monkeypatch.delenv("MCP_GAS_ALERT_THRESHOLD", raising=False)
@@ -125,6 +129,16 @@ def test_load_config_with_dexscreener_command(monkeypatch):
     assert dex.server_command == ("node", "custom/index.js", "--port", "1234")
 
 
+def test_load_config_with_coingecko(monkeypatch):
+    monkeypatch.setenv("COINGECKO_API_KEY", "abc123")
+    config = load_config()
+
+    coingecko = next(srv for srv in config.mcp_servers if srv.kind == "coingecko")
+    assert coingecko.server_command == ("npx", "-y", "@coingecko/coingecko-mcp")
+    assert coingecko.env.get("COINGECKO_PRO_API_KEY") == "abc123"
+    assert coingecko.env.get("COINGECKO_ENVIRONMENT") == "pro"
+
+
 def test_load_config_from_json(monkeypatch):
     servers = [
         {
@@ -140,6 +154,12 @@ def test_load_config_from_json(monkeypatch):
             "kind": "dexscreener",
             "command": ["node", "dex/index.js"],
         },
+        {
+            "key": "coingecko-local",
+            "kind": "coingecko",
+            "command": ["node", "cg/index.js"],
+            "env": {"COINGECKO_PRO_API_KEY": "abc"},
+        },
     ]
     monkeypatch.setenv("MCP_SERVERS", json.dumps(servers))
     monkeypatch.setenv("MCP_PRIMARY_EVM", "evm-mainnet")
@@ -149,7 +169,7 @@ def test_load_config_from_json(monkeypatch):
 
     assert config.primary_evm_server == "evm-mainnet"
     assert config.primary_dexscreener_server == "dexscreener-main"
-    assert len(config.mcp_servers) == 2
+    assert len(config.mcp_servers) == 3
     rpc_server = next(srv for srv in config.mcp_servers if srv.key == "evm-mainnet")
     assert rpc_server.protocol == MCP_PROTOCOL_JSONRPC
     assert rpc_server.rpc_urls["ethereum"] == "https://rpc.ankr.com/eth"

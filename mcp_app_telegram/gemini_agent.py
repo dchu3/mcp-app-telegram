@@ -13,8 +13,32 @@ from .formatting import (
     format_generic_tool_result,
     format_transaction,
     format_dexscreener_pairs,
+    format_dexscreener_profiles,
+    format_dexscreener_boosts,
+    format_dexscreener_orders,
+)
+from .coingecko_formatting import (
+    format_asset_platforms,
+    format_coin_detail,
+    format_coin_history,
+    format_coins_markets,
+    format_generic_list,
+    format_global,
+    format_list,
+    format_market_chart,
+    format_nft,
+    format_ohlc,
+    format_search,
+    format_search_trending,
+    format_simple_price,
+    format_token_price,
+    format_top_gainers_losers,
+    format_onchain_list,
+    format_token_holders,
+    format_trades,
 )
 from .mcp_client import (
+    CoingeckoMcpClient,
     DexscreenerMcpClient,
     EvmMcpClient,
     McpClientError,
@@ -205,8 +229,47 @@ class GeminiAgent:
 def build_dexscreener_tool_definitions(
     client: DexscreenerMcpClient,
 ) -> Sequence[ToolDefinition]:
+    def _extract_payload(raw: Mapping[str, Any]) -> Optional[Any]:
+        content = raw.get("content") if isinstance(raw, Mapping) else None
+        if isinstance(content, Sequence):
+            for item in content:
+                if isinstance(item, Mapping) and item.get("type") == "text":
+                    text = item.get("text")
+                    if isinstance(text, str):
+                        try:
+                            return json.loads(text)
+                        except json.JSONDecodeError:
+                            continue
+        inner = raw.get("toolResult") if isinstance(raw, Mapping) else None
+        if isinstance(inner, Mapping):
+            return inner
+        return None
+
+    def _formatter_pairs(data: Any) -> Optional[str]:
+        return format_dexscreener_pairs(data)
+
+    formatters: Dict[str, Callable[[Any], Optional[str]]] = {
+        "searchPairs": _formatter_pairs,
+        "getPairByChainAndAddress": _formatter_pairs,
+        "getTokenPools": _formatter_pairs,
+        "getPairsByToken": _formatter_pairs,
+        "getLatestTokenProfiles": lambda data: format_dexscreener_profiles(
+            data if isinstance(data, Sequence) else []
+        ),
+        "getLatestBoostedTokens": lambda data: format_dexscreener_boosts(
+            data if isinstance(data, Sequence) else [], heading="Latest Boosted Tokens"
+        ),
+        "getMostActiveBoostedTokens": lambda data: format_dexscreener_boosts(
+            data if isinstance(data, Sequence) else [], heading="Most Active Boosted Tokens"
+        ),
+        "checkTokenOrders": lambda data: format_dexscreener_orders(
+            data if isinstance(data, Sequence) else []
+        ),
+    }
+
     definitions: List[ToolDefinition] = []
     for tool in client.tools:
+
         async def _handler(args: Mapping[str, Any], *, _tool=tool) -> str:
             try:
                 raw_result = await client.call_tool(_tool.name, args)
@@ -214,12 +277,28 @@ def build_dexscreener_tool_definitions(
                 return f"Dexscreener error: {exc}"
 
             parsed = client.parse_tool_result(raw_result)
-            if isinstance(parsed, Mapping):
-                summary = format_dexscreener_pairs(parsed)
-                if summary:
-                    return summary
+            if parsed is None and isinstance(raw_result, Mapping):
+                parsed = _extract_payload(raw_result)
 
-            return "Dexscreener returned data I couldn't summarise. Try narrowing the query."
+            formatter_fn = formatters.get(_tool.name.split("__", 1)[-1])
+            if formatter_fn is not None and parsed is not None:
+                try:
+                    formatted = formatter_fn(parsed)
+                except Exception:  # pragma: no cover - defensive
+                    _LOGGER.exception("Failed to format Dexscreener result for %s", _tool.name)
+                else:
+                    if formatted:
+                        return formatted
+
+            if isinstance(parsed, Mapping):
+                return format_generic_tool_result(_tool.name, parsed)
+            if parsed is not None:
+                return format_generic_tool_result(_tool.name, {"items": parsed})
+
+            return format_generic_tool_result(
+                _tool.name,
+                raw_result if isinstance(raw_result, Mapping) else {"result": raw_result},
+            )
 
         definitions.append(
             ToolDefinition(
@@ -229,6 +308,117 @@ def build_dexscreener_tool_definitions(
                 handler=_handler,
             )
         )
+    return definitions
+
+
+def build_coingecko_tool_definitions(client: CoingeckoMcpClient) -> Sequence[ToolDefinition]:
+    def _ensure_sequence(value: Any) -> Sequence[Any]:
+        if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+            return value
+        if isinstance(value, Mapping):
+            return []
+        return []
+
+    formatters: Dict[str, Callable[[Any], Optional[str]]] = {
+        "get_coins_markets": lambda data: format_coins_markets(data if isinstance(data, Sequence) else []),
+        "get_coins_top_gainers_losers": lambda data: format_top_gainers_losers(data) if isinstance(data, Mapping) else None,
+        "get_simple_price": lambda data: format_simple_price(data) if isinstance(data, Mapping) else None,
+        "get_id_simple_token_price": lambda data: format_token_price(data) if isinstance(data, Mapping) else None,
+        "get_simple_supported_vs_currencies": lambda data: format_generic_list(data if isinstance(data, Sequence) else [], "💱 Coingecko: Supported Currencies"),
+        "get_asset_platforms": lambda data: format_asset_platforms(data if isinstance(data, Sequence) else []),
+        "get_coins_list": lambda data: format_list(data if isinstance(data, Sequence) else [], "🪙 Coingecko: Coins"),
+        "get_new_coins_list": lambda data: format_list(data if isinstance(data, Sequence) else [], "🆕 Coingecko: New Coins"),
+        "get_list_coins_categories": lambda data: format_list(data if isinstance(data, Sequence) else [], "📚 Coingecko: Coin Categories"),
+        "get_search": lambda data: format_search(data) if isinstance(data, Mapping) else None,
+        "get_search_trending": lambda data: format_search_trending(data) if isinstance(data, Mapping) else None,
+        "get_global": lambda data: format_global(data) if isinstance(data, Mapping) else None,
+        "get_id_coins": lambda data: format_coin_detail(data) if isinstance(data, Mapping) else None,
+        "get_coins_history": lambda data: format_coin_history(data) if isinstance(data, Mapping) else None,
+        "get_coins_contract": lambda data: format_coin_detail(data) if isinstance(data, Mapping) else None,
+        "get_range_coins_market_chart": lambda data: format_market_chart(data, heading="📊 Coingecko: Market Chart") if isinstance(data, Mapping) else None,
+        "get_range_contract_coins_market_chart": lambda data: format_market_chart(data, heading="📊 Coingecko: Contract Market Chart") if isinstance(data, Mapping) else None,
+        "get_nfts_market_chart": lambda data: format_market_chart(data, heading="📊 Coingecko: NFT Market Chart") if isinstance(data, Mapping) else None,
+        "get_range_coins_ohlc": lambda data: format_ohlc(data) if isinstance(data, Sequence) else None,
+        "get_id_nfts": lambda data: format_nft(data) if isinstance(data, Mapping) else None,
+        "get_list_nfts": lambda data: format_list(data if isinstance(data, Sequence) else [], "🖼️ Coingecko: NFT Collections"),
+        "get_onchain_categories": lambda data: format_onchain_list(data, heading="🧾 Coingecko Onchain Categories") if isinstance(data, Mapping) else None,
+        "get_pools_onchain_categories": lambda data: format_onchain_list(data, heading="🏊 Coingecko Pool Categories") if isinstance(data, Mapping) else None,
+        "get_onchain_networks": lambda data: format_onchain_list(data, heading="🌐 Coingecko Networks") if isinstance(data, Mapping) else None,
+        "get_networks_onchain_new_pools": lambda data: format_onchain_list(data, heading="🆕 Coingecko New Pools") if isinstance(data, Mapping) else None,
+        "get_network_networks_onchain_new_pools": lambda data: format_onchain_list(data, heading="🆕 Coingecko Network Pools") if isinstance(data, Mapping) else None,
+        "get_networks_onchain_trending_pools": lambda data: format_onchain_list(data, heading="📈 Coingecko Trending Pools") if isinstance(data, Mapping) else None,
+        "get_network_networks_onchain_trending_pools": lambda data: format_onchain_list(data, heading="📈 Coingecko Network Trending Pools") if isinstance(data, Mapping) else None,
+        "get_networks_onchain_dexes": lambda data: format_onchain_list(data, heading="💱 Coingecko DEXes") if isinstance(data, Mapping) else None,
+        "get_pools_networks_onchain_dexes": lambda data: format_onchain_list(data, heading="💱 Coingecko DEX Pools") if isinstance(data, Mapping) else None,
+        "get_networks_onchain_pools": lambda data: format_onchain_list(data, heading="🏊 Coingecko Pools") if isinstance(data, Mapping) else None,
+        "get_address_networks_onchain_pools": lambda data: format_onchain_list(data, heading="🏊 Coingecko Address Pools") if isinstance(data, Mapping) else None,
+        "get_pools_networks_onchain_info": lambda data: format_onchain_list(data, heading="ℹ️ Coingecko Pool Info") if isinstance(data, Mapping) else None,
+        "get_timeframe_pools_networks_onchain_ohlcv": lambda data: format_market_chart(data if isinstance(data, Mapping) else {}, heading="📊 Coingecko Pool OHLCV"),
+        "get_pools_networks_onchain_trades": lambda data: format_trades(data, heading="🛒 Coingecko Pool Trades") if isinstance(data, Mapping) else None,
+        "get_address_networks_onchain_tokens": lambda data: format_onchain_list(data, heading="🔍 Coingecko Address Tokens") if isinstance(data, Mapping) else None,
+        "get_tokens_networks_onchain_info": lambda data: format_onchain_list(data, heading="ℹ️ Coingecko Token Info") if isinstance(data, Mapping) else None,
+        "get_tokens_networks_onchain_top_holders": lambda data: format_token_holders(data) if isinstance(data, Mapping) else None,
+        "get_tokens_networks_onchain_pools": lambda data: format_onchain_list(data, heading="🏊 Coingecko Token Pools") if isinstance(data, Mapping) else None,
+        "get_tokens_networks_onchain_trades": lambda data: format_trades(data, heading="🛒 Coingecko Token Trades") if isinstance(data, Mapping) else None,
+        "get_pools_onchain_megafilter": lambda data: format_onchain_list(data, heading="🧮 Coingecko Megafilter") if isinstance(data, Mapping) else None,
+        "get_pools_onchain_trending_search": lambda data: format_onchain_list(data, heading="📈 Coingecko Trending Pools") if isinstance(data, Mapping) else None,
+        "get_search_onchain_pools": lambda data: format_onchain_list(data, heading="🔍 Coingecko Pool Search") if isinstance(data, Mapping) else None,
+        "get_addresses_networks_simple_onchain_token_price": lambda data: format_simple_price(data) if isinstance(data, Mapping) else None,
+    }
+
+    definitions: List[ToolDefinition] = []
+    for tool in client.tools:
+
+        async def _handler(args: Mapping[str, Any], *, _tool=tool) -> str:
+            try:
+                raw_result = await client.call_tool(_tool.name, args)
+            except McpClientError as exc:
+                return f"Coingecko error: {exc}"
+
+            parsed = client.parse_tool_result(raw_result)
+            if parsed is None and isinstance(raw_result, Mapping):
+                content = raw_result.get("content")
+                if isinstance(content, Sequence):
+                    for item in content:
+                        if isinstance(item, Mapping) and item.get("type") == "text":
+                            text = item.get("text")
+                            if isinstance(text, str):
+                                try:
+                                    parsed = json.loads(text)
+                                except json.JSONDecodeError:
+                                    continue
+                                else:
+                                    break
+
+            formatter_fn = formatters.get(_tool.name)
+            if formatter_fn is not None and parsed is not None:
+                try:
+                    formatted = formatter_fn(parsed)
+                except Exception:  # pragma: no cover - defensive guard
+                    _LOGGER.exception("Failed to format Coingecko result for %s", _tool.name)
+                else:
+                    if formatted:
+                        return formatted
+
+            if isinstance(parsed, Mapping):
+                return format_generic_tool_result(_tool.name, parsed)
+            if parsed is not None:
+                return format_generic_tool_result(_tool.name, {"result": parsed})
+
+            return format_generic_tool_result(
+                _tool.name,
+                raw_result if isinstance(raw_result, Mapping) else {"result": raw_result},
+            )
+
+        definitions.append(
+            ToolDefinition(
+                name=tool.name,
+                description=tool.description,
+                arguments=tool.arguments,
+                handler=_handler,
+            )
+        )
+
     return definitions
 
 

@@ -30,6 +30,7 @@ Async Telegram bot that surfaces Base Chain data through the MCP EVM server (or 
    Additional knobs:
    - `MCP_SERVERS` – JSON array of MCP server definitions (see below) when running multiple integrations.
    - `MCP_PRIMARY_EVM` / `MCP_PRIMARY_DEXSCREENER` – pick the default server keys for bot commands.
+   - `COINGECKO_PRO_API_KEY` / `COINGECKO_API_KEY` – when set, automatically enables the Coingecko MCP server (override command with `COINGECKO_MCP_COMMAND`).
    - `GEMINI_MODEL` – override the Gemini model used for Gemini-powered responses (default `gemini-1.5-flash-latest`).
    - `TELEGRAM_HTTP_READ_TIMEOUT` / `TELEGRAM_HTTP_CONNECT_TIMEOUT` – override Telegram HTTP timeouts.
    - Legacy environment variables (`MCP_EVM_BASE_URL`, `MCP_EVM_PROTOCOL`, `MCP_EVM_SERVER_COMMAND`, `MCP_EVM_NETWORK`, `DEXSCREENER_MCP_*`) remain supported and populate a single-server configuration when `MCP_SERVERS` is not set.
@@ -48,6 +49,15 @@ Async Telegram bot that surfaces Base Chain data through the MCP EVM server (or 
        "key": "dex-central",
        "kind": "dexscreener",
        "command": ["node", "/opt/dexscreener/index.js"]
+     },
+     {
+       "key": "coingecko",
+       "kind": "coingecko",
+       "command": ["npx", "-y", "@coingecko/coingecko-mcp"],
+       "env": {
+         "COINGECKO_PRO_API_KEY": "abcd1234",
+         "COINGECKO_ENVIRONMENT": "pro"
+       }
      }
    ]
    ```

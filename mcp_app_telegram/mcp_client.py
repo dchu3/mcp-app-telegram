@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from .mcp import (
     AccountSummary,
+    CoingeckoMcpClient,
     DexscreenerMcpClient,
     EvmMcpClient,
     GasStats,
@@ -20,6 +21,7 @@ from .mcp import (
 __all__ = [
     "AccountSummary",
     "DexscreenerMcpClient",
+    "CoingeckoMcpClient",
     "EvmMcpClient",
     "GasStats",
     "McpClient",

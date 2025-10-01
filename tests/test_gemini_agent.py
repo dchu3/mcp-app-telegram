@@ -7,8 +7,9 @@ from mcp_app_telegram.gemini_agent import (
     GeminiAgent,
     ToolDefinition,
     build_dexscreener_tool_definitions,
+    build_coingecko_tool_definitions,
 )
-from mcp_app_telegram.mcp_client import EvmMcpClient, GasStats, McpToolDefinition
+from mcp_app_telegram.mcp_client import CoingeckoMcpClient, EvmMcpClient, GasStats, McpToolDefinition
 from mcp_app_telegram.mcp.manager import McpClientRegistry
 
 
@@ -159,6 +160,49 @@ async def test_build_dexscreener_tool_definitions_runs_handler():
     assert "AVNT/WETH" in result
 
 
+@pytest.mark.asyncio
+async def test_build_coingecko_tool_definitions_runs_handler():
+    class FakeCoingeckoClient:
+        def __init__(self) -> None:
+            self.tools = (
+                McpToolDefinition(
+                    name="get_coins_markets",
+                    description="Markets",
+                    arguments={},
+                ),
+            )
+
+        async def call_tool(self, name, arguments):
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps(
+                            [
+                                {
+                                    "name": "Bitcoin",
+                                    "symbol": "btc",
+                                    "current_price": 68000,
+                                    "price_change_percentage_24h": 2.1,
+                                    "market_cap": 1_200_000_000_000,
+                                }
+                            ]
+                        ),
+                    }
+                ]
+            }
+
+        def parse_tool_result(self, result):
+            return None
+
+    client = FakeCoingeckoClient()
+    definitions = build_coingecko_tool_definitions(client)  # type: ignore[arg-type]
+    handler = definitions[0].handler
+    output = await handler({})
+    assert "Coingecko" in output
+    assert "Bitcoin" in output
+
+
 def test_format_dexscreener_pairs_handles_empty():
     from mcp_app_telegram.formatting import format_dexscreener_pairs
 
@@ -223,7 +267,8 @@ async def test_dexscreener_handler_unparseable_payload():
 
     response = await handler({})
 
-    assert "couldn't summarise" in response
+    assert "dexscreener__searchPairs result" in response
+    assert "```json" in response
 class StubEvmClient(EvmMcpClient):
     def __init__(self) -> None:
         # Bypass parent initialisation.

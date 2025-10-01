@@ -19,9 +19,10 @@ from .config import (
 from .gemini_agent import (
     GeminiAgent,
     GeminiAgentError,
+    build_coingecko_tool_definitions,
     build_dexscreener_tool_definitions,
 )
-from .mcp import DexscreenerMcpClient, EvmMcpClient
+from .mcp import CoingeckoMcpClient, DexscreenerMcpClient, EvmMcpClient
 from .mcp.manager import McpClientRegistry
 from .database import initialize_database
 
@@ -40,6 +41,7 @@ async def run() -> None:
 
     evm_client: Optional[EvmMcpClient] = None
     dex_client: Optional[DexscreenerMcpClient] = None
+    coingecko_clients: Dict[str, CoingeckoMcpClient] = {}
 
     for server in config.mcp_servers:
         if server.kind == "evm":
@@ -82,6 +84,11 @@ async def run() -> None:
             registry.register(server.key, client)
             if server.key == config.primary_dexscreener_server:
                 dex_client = client
+        elif server.kind == "coingecko":
+            command = server.server_command or ("npx", "-y", "@coingecko/coingecko-mcp")
+            client = CoingeckoMcpClient(command, env=server.env or None, cwd=server.cwd)
+            registry.register(server.key, client)
+            coingecko_clients[server.key] = client
         else:
             logging.getLogger(__name__).warning(
                 "Ignoring MCP server '%s' with unsupported kind '%s'",
@@ -112,6 +119,8 @@ async def run() -> None:
             )
             if dex_client is not None:
                 agent.extend_tools(build_dexscreener_tool_definitions(dex_client))
+            for cg_client in coingecko_clients.values():
+                agent.extend_tools(build_coingecko_tool_definitions(cg_client))
         except GeminiAgentError as exc:
             logging.getLogger(__name__).warning("Gemini agent disabled: %s", exc)
 
@@ -121,6 +130,7 @@ async def run() -> None:
         alert_manager,
         agent=agent,
         dex_client=dex_client,
+        coingecko_clients=coingecko_clients,
         primary_evm_key=config.primary_evm_server,
         primary_dex_key=config.primary_dexscreener_server,
         network_client_map=network_client_map,
