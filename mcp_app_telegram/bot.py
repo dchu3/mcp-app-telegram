@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from functools import partial
-from typing import Mapping, Optional
+from typing import Any, Mapping, Optional
 
 from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -305,6 +305,7 @@ def build_application(
     *,
     agent: Optional[GeminiAgent] = None,
     dex_client: Optional[DexscreenerMcpClient] = None,
+    coingecko_clients: Mapping[str, Any] | None = None,
     primary_evm_key: str,
     primary_dex_key: Optional[str],
     network_client_map: Mapping[str, str],
@@ -331,6 +332,7 @@ def build_application(
             "alert_manager": alert_manager,
             "agent": agent,
             "dex_client": dex_client,
+            "coingecko_clients": dict(coingecko_clients or {}),
             "primary_evm_key": primary_evm_key,
             "primary_dex_key": primary_dex_key,
             "network_client_map": dict(network_client_map),

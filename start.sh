@@ -1,13 +1,19 @@
 #!/bin/bash
 set -euo pipefail
 
-MCP_SERVER_PID=""
+DEX_MCP_PID=""
+CG_MCP_PID=""
 
 cleanup() {
-  if [ -n "$MCP_SERVER_PID" ] && kill -0 "$MCP_SERVER_PID" 2>/dev/null; then
-    kill "$MCP_SERVER_PID" 2>/dev/null || true
-    wait "$MCP_SERVER_PID" 2>/dev/null || true
-    MCP_SERVER_PID=""
+  if [ -n "$DEX_MCP_PID" ] && kill -0 "$DEX_MCP_PID" 2>/dev/null; then
+    kill "$DEX_MCP_PID" 2>/dev/null || true
+    wait "$DEX_MCP_PID" 2>/dev/null || true
+    DEX_MCP_PID=""
+  fi
+  if [ -n "$CG_MCP_PID" ] && kill -0 "$CG_MCP_PID" 2>/dev/null; then
+    kill "$CG_MCP_PID" 2>/dev/null || true
+    wait "$CG_MCP_PID" 2>/dev/null || true
+    CG_MCP_PID=""
   fi
 }
 
@@ -24,7 +30,7 @@ else
 fi
 
 # Optionally boot the Dexscreener MCP server in the background.
-if [ "${SKIP_LOCAL_MCP_SERVER:-0}" != "1" ]; then
+if [ "${SKIP_LOCAL_DEXS_MCP:-${SKIP_LOCAL_MCP_SERVER:-0}}" != "1" ]; then
   if [ -z "${DEXSCREENER_MCP_ROOT:-}" ]; then
     echo "Refusing to start Dexscreener MCP server: DEXSCREENER_MCP_ROOT is not set." >&2
     echo "Set DEXSCREENER_MCP_ROOT to the directory containing mcp-dexscreener/index.js." >&2
@@ -40,16 +46,37 @@ if [ "${SKIP_LOCAL_MCP_SERVER:-0}" != "1" ]; then
 
   echo "Starting Dexscreener MCP server..."
   node "$MCP_SERVER_ENTRY" &
-  MCP_SERVER_PID=$!
+  DEX_MCP_PID=$!
   # Give the server a brief moment to bind its port before the bot connects.
   sleep 1
 else
-  echo "Skipping Dexscreener MCP server startup (SKIP_LOCAL_MCP_SERVER=1)."
+  echo "Skipping Dexscreener MCP server startup (SKIP_LOCAL_DEXS_MCP=1)."
+fi
+
+if [ "${SKIP_LOCAL_COINGECKO_MCP:-0}" != "1" ]; then
+  COINGECKO_KEY=${COINGECKO_PRO_API_KEY:-${COINGECKO_API_KEY:-}}
+  if ! command -v npx >/dev/null 2>&1; then
+    echo "Cannot start Coingecko MCP server because 'npx' is not available." >&2
+  else
+    if [ -z "$COINGECKO_KEY" ]; then
+      echo "COINGECKO_PRO_API_KEY/COINGECKO_API_KEY is not set; skipping Coingecko MCP server startup." >&2
+    else
+      echo "Starting Coingecko MCP server..."
+      env COINGECKO_PRO_API_KEY="$COINGECKO_KEY" \
+          COINGECKO_ENVIRONMENT="${COINGECKO_ENVIRONMENT:-pro}" \
+          npx -y @coingecko/coingecko-mcp >/tmp/coingecko-mcp.log 2>&1 &
+      CG_MCP_PID=$!
+      sleep 1
+    fi
+  fi
+else
+  echo "Skipping Coingecko MCP server startup (SKIP_LOCAL_COINGECKO_MCP=1)."
 fi
 
 echo "Starting Telegram MCP application..."
 python -m mcp_app_telegram
 APP_EXIT_CODE=$?
+
 
 cleanup
 

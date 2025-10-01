@@ -10,11 +10,13 @@ from .base import (
     TransactionSummary,
 )
 from .dexscreener_client import DexscreenerMcpClient
+from .coingecko_client import CoingeckoMcpClient
 from .evm_client import EvmMcpClient
 
 __all__ = [
     "AccountSummary",
     "DexscreenerMcpClient",
+    "CoingeckoMcpClient",
     "EvmMcpClient",
     "GasStats",
     "McpClient",

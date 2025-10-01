@@ -71,5 +71,5 @@ class ToolClient(McpClient, ABC):
         """Invoke a tool exposed by the server and return its raw response."""
 
     @abstractmethod
-    def parse_tool_result(self, result: Any) -> Optional[Dict[str, Any]]:
+    def parse_tool_result(self, result: Any) -> Optional[Any]:
         """Best-effort JSON parsing for tool results."""
