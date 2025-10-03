@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 from functools import partial
+import json
 from typing import Any, Mapping, Optional
 
-from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Bot, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     AIORateLimiter,
     Application,
@@ -15,17 +16,28 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
     MessageHandler,
+    TypeHandler,
     filters,
 )
 from telegram.request import HTTPXRequest
 
 from .alerts import GasAlertManager, GasAlertSubscription
+from .arb.profiles import ProfileService
+from .arb.signals import ArbSignalService
+from .bot_commands.admin_pairs import COMMAND_HANDLERS as ADMIN_COMMANDS
+from .bot_commands.subscriptions import COMMAND_HANDLERS as SUBSCRIPTION_COMMANDS
 from .config import Config
+from .database import get_distinct_networks_with_alerts
 from .formatting import format_account, format_gas_stats, format_transaction
 from .gemini_agent import GeminiAgent, GeminiAgentError
-from .database import get_distinct_networks_with_alerts
-from .mcp_client import DexscreenerMcpClient, EvmMcpClient, McpClientError
+from .infra.ratelimit import RequestRateLimiter
+from .infra.scheduler import CentralScheduler
+from .infra.store import InMemoryStore
+from .infra.swr import SwrCache
+from .market.dispatcher import MarketUpdateDispatcher
+from .market.fetcher import MarketDataFetcher
 from .mcp.manager import McpClientRegistry
+from .mcp_client import DexscreenerMcpClient, EvmMcpClient, McpClientError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,10 +48,27 @@ TELEGRAM_COMMANDS = [
     BotCommand("gas", "Show Base gas stats"),
     BotCommand("account", "Show account balance and nonce"),
     BotCommand("transaction", "Summarize transaction status"),
+    BotCommand("tx", "Alias for /transaction"),
     BotCommand("gasalert", "Alert when fast gas drops below threshold"),
     BotCommand("gasalertabove", "Alert when fast gas rises above threshold"),
     BotCommand("cleargasalerts", "Clear gas alerts for this chat"),
     BotCommand("gasalerts", "List active gas alerts for this chat"),
+    BotCommand("gas_sub", "Alias for /gasalert"),
+    BotCommand("gas_sub_above", "Alias for /gasalertabove"),
+    BotCommand("gas_clear", "Alias for /cleargasalerts"),
+    BotCommand("pairs", "List tracked arbitrage pairs"),
+    BotCommand("sub", "Subscribe to a tracked pair"),
+    BotCommand("unsub", "Remove a pair subscription"),
+    BotCommand("mysubs", "List your pair subscriptions"),
+    BotCommand("suball", "Subscribe to all tracked pairs"),
+    BotCommand("unsuball", "Clear global pair subscription"),
+]
+
+ADMIN_TELEGRAM_COMMANDS = [
+    BotCommand("rotatepairs", "Admin: Reorder tracked pairs"),
+    BotCommand("limits", "Admin: Show scan limits"),
+    BotCommand("mcptest", "Admin: List MCP clients"),
+    BotCommand("rpcping", "Admin: Check primary EVM RPC"),
 ]
 
 
@@ -48,11 +77,17 @@ _HELP_TEXT = (
     "- Send a normal message: Gemini agent picks an MCP tool to answer.\n"
     "- /gas : Base gas tiers, base fee, and sequencer lag.\n"
     "- /account <address> : Balance, nonce, and contract status for an address.\n"
-    "- /transaction <hash> : Transaction status, gas used, and value.\n"
-    "- /gasalert <network> <gwei> : Alert when fast gas drops below a threshold.\n"
-    "- /gasalertabove <network> <gwei> : Alert when fast gas rises above a threshold.\n"
-    "- /cleargasalerts : Clear pending gas alerts in this chat.\n"
-    "- /gasalerts : List active gas alerts in this chat."
+    "- /transaction <hash> (alias /tx) : Transaction status, gas used, and value.\n"
+    "- /gasalert <network> <gwei> (alias /gas_sub) : Alert when fast gas drops below a threshold.\n"
+    "- /gasalertabove <network> <gwei> (alias /gas_sub_above) : Alert when fast gas rises above a threshold.\n"
+    "- /cleargasalerts (alias /gas_clear) : Clear pending gas alerts in this chat.\n"
+    "- /gasalerts : List active gas alerts in this chat.\n"
+    "- /pairs : List tracked arbitrage pairs with realtime age.\n"
+    "- /sub <index|pair> : Subscribe to a tracked pair.\n"
+    "- /unsub <index|pair> : Remove a tracked pair subscription.\n"
+    "- /suball : Subscribe to all tracked pairs when allowed.\n"
+    "- /unsuball : Clear the global pair subscription.\n"
+    "- /mysubs : Show your current pair subscriptions."
 )
 
 _TELEGRAM_MESSAGE_LIMIT = 4000
@@ -112,12 +147,42 @@ async def _reply_text_chunks(message, text: str) -> None:
         await message.reply_text(chunk.strip())
 
 
+async def _log_incoming_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Emit a debug-level log for every incoming update without altering flow."""
+
+    if not _LOGGER.isEnabledFor(logging.INFO):
+        return
+
+    description: dict[str, object] = {}
+    if update.effective_chat is not None:
+        description["chat_id"] = update.effective_chat.id
+        description["chat_type"] = update.effective_chat.type
+    if update.effective_user is not None:
+        description["user_id"] = update.effective_user.id
+        description["username"] = update.effective_user.username
+    message = update.effective_message
+    if message is not None:
+        description["text"] = message.text
+        description.setdefault("entities", message.entities)
+    callback = update.callback_query
+    if callback is not None:
+        description["callback_data"] = callback.data
+    try:
+        payload = json.dumps(description, default=str)
+    except (TypeError, ValueError):  # pragma: no cover - defensive fallback
+        payload = str(description)
+    _LOGGER.info("Incoming update: %s", payload)
+
+
 async def _handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    _LOGGER.info("Handling /help for chat %s", update.effective_chat.id if update.effective_chat else "?")
     await update.effective_message.reply_text(_HELP_TEXT)
 
 
 async def _handle_gas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    _LOGGER.info("Handling /gas for chat %s", update.effective_chat.id if update.effective_chat else "?")
     client = _primary_evm_client(context.application.bot_data)
+    network_label = context.application.bot_data.get("primary_evm_network")
     try:
         stats = await client.fetch_gas_stats()
     except Exception as exc:  # pragma: no cover - network failure guard
@@ -125,7 +190,7 @@ async def _handle_gas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.effective_message.reply_text(f"Error fetching gas stats: {exc}")
         return
 
-    text = format_gas_stats(stats)
+    text = format_gas_stats(stats, network=network_label)
     keyboard = InlineKeyboardMarkup.from_button(
         InlineKeyboardButton("Refresh", callback_data=REFRESH_QUERY)
     )
@@ -138,18 +203,25 @@ async def _handle_gas_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     await query.answer()
     client = _primary_evm_client(context.application.bot_data)
+    network_label = context.application.bot_data.get("primary_evm_network")
     try:
         stats = await client.fetch_gas_stats()
     except Exception as exc:  # pragma: no cover
         await query.edit_message_text(f"Error fetching gas stats: {exc}")
         return
 
-    await query.edit_message_text(format_gas_stats(stats), reply_markup=query.message.reply_markup)
+    await query.edit_message_text(
+        format_gas_stats(stats, network=network_label),
+        reply_markup=query.message.reply_markup,
+    )
 
 
 async def _handle_tx(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    _LOGGER.info("Handling /transaction for chat %s", update.effective_chat.id if update.effective_chat else "?")
     if not context.args:
-        await update.effective_message.reply_text("Usage: /tx <transaction-hash>")
+        await update.effective_message.reply_text(
+            "Usage: /transaction <transaction-hash> (alias: /tx)"
+        )
         return
     tx_hash = context.args[0]
     client = _primary_evm_client(context.application.bot_data)
@@ -173,6 +245,7 @@ async def _handle_text_query(update: Update, context: ContextTypes.DEFAULT_TYPE)
     text = (message.text or "").strip()
     if not text:
         return
+    _LOGGER.info("Handling text query in chat %s", update.effective_chat.id if update.effective_chat else "?")
 
     agent: Optional[GeminiAgent] = context.application.bot_data.get("agent")
     if agent is None:
@@ -194,6 +267,7 @@ async def _handle_text_query(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def _handle_account(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    _LOGGER.info("Handling /account for chat %s", update.effective_chat.id if update.effective_chat else "?")
     if not context.args:
         await update.effective_message.reply_text("Usage: /account <address>")
         return
@@ -218,8 +292,17 @@ async def _handle_account(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def _handle_subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE, direction: str) -> None:
+    _LOGGER.info(
+        "Handling gas alert subscribe (%s) for chat %s",
+        direction,
+        update.effective_chat.id if update.effective_chat else "?",
+    )
     if len(context.args) != 2:
-        await update.effective_message.reply_text("Usage: /gasalert <network> <threshold_gwei>")
+        alias = "/gas_sub" if direction == "below" else "/gas_sub_above"
+        command = "/gasalert" if direction == "below" else "/gasalertabove"
+        await update.effective_message.reply_text(
+            f"Usage: {command} <network> <threshold_gwei> (alias: {alias})"
+        )
         return
     network_input = context.args[0]
     network = network_input.lower()
@@ -251,12 +334,14 @@ async def _handle_subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 
 
 async def _handle_clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    _LOGGER.info("Handling gas alert clear for chat %s", update.effective_chat.id if update.effective_chat else "?")
     alert_manager: GasAlertManager = context.application.bot_data["alert_manager"]
     await alert_manager.clear_for_chat(update.effective_chat.id)
     await update.effective_message.reply_text("Cleared gas alert subscriptions for this chat.")
 
 
 async def _handle_list_gas_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    _LOGGER.info("Handling gas alerts list for chat %s", update.effective_chat.id if update.effective_chat else "?")
     alert_manager: GasAlertManager = context.application.bot_data["alert_manager"]
     subscriptions = await alert_manager.list_subscriptions(update.effective_chat.id)
     if not subscriptions:
@@ -267,6 +352,28 @@ async def _handle_list_gas_alerts(update: Update, context: ContextTypes.DEFAULT_
     for sub in subscriptions:
         message += f"- {sub.describe()}\n"
     await update.effective_message.reply_text(message)
+
+
+async def _handle_unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    if message is None:
+        return
+    raw_text = (message.text or "").strip()
+    if not raw_text.startswith("/"):
+        return
+    command = raw_text.split()[0]
+    normalized = command.split("@", 1)[0][1:].lower()
+    known: set[str] = context.application.bot_data.get("known_commands", set())
+    if normalized in known:
+        _LOGGER.debug("Command %s already handled upstream; skipping unknown handler", command)
+        return
+    if normalized == "start":
+        _LOGGER.debug("Suppressing /start fallback reply")
+        return
+    _LOGGER.info("Received unknown command: %s", command)
+    await message.reply_text(
+        f"Unknown command '{command}'. Send /help for the list of supported commands."
+    )
 
 
 async def gas_monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -287,7 +394,7 @@ async def gas_monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         if not matches:
             continue
 
-        message = format_gas_stats(stats)
+        message = format_gas_stats(stats, network=network)
         for subscription in matches:
             try:
                 await context.bot.send_message(
@@ -309,6 +416,13 @@ def build_application(
     primary_evm_key: str,
     primary_dex_key: Optional[str],
     network_client_map: Mapping[str, str],
+    store: InMemoryStore,
+    rate_limiter: RequestRateLimiter,
+    swr_cache: SwrCache,
+    scheduler: CentralScheduler,
+    profile_service: ProfileService,
+    signal_service: ArbSignalService,
+    market_fetcher: MarketDataFetcher,
 ) -> Application:
     request = HTTPXRequest(
         read_timeout=config.telegram_read_timeout,
@@ -336,22 +450,65 @@ def build_application(
             "primary_evm_key": primary_evm_key,
             "primary_dex_key": primary_dex_key,
             "network_client_map": dict(network_client_map),
+            "store": store,
+            "rate_limiter": rate_limiter,
+            "swr_cache": swr_cache,
+            "scheduler": scheduler,
+            "profile_service": profile_service,
+            "signal_service": signal_service,
+            "market_fetcher": market_fetcher,
         }
     )
+
+    primary_network = next(
+        (name for name, key in network_client_map.items() if key == primary_evm_key),
+        None,
+    )
+    if primary_network:
+        application.bot_data["primary_evm_network"] = primary_network
+
+    dispatcher = MarketUpdateDispatcher(application, store, profile_service, signal_service)
+    scheduler.set_on_snapshot(dispatcher.handle_snapshot)
+    application.bot_data["market_dispatcher"] = dispatcher
 
     application.add_handler(CommandHandler("help", _handle_help))
     application.add_handler(CommandHandler("gas", _handle_gas))
     application.add_handler(CommandHandler("account", _handle_account))
-    application.add_handler(CommandHandler("transaction", _handle_tx))
-    application.add_handler(CommandHandler("gasalert", partial(_handle_subscribe, direction="below")))
-    application.add_handler(CommandHandler("gasalertabove", partial(_handle_subscribe, direction="above")))
-    application.add_handler(CommandHandler("cleargasalerts", _handle_clear))
-    application.add_handler(CommandHandler("gasalerts", _handle_list_gas_alerts))
+    application.add_handler(CommandHandler(["transaction", "tx"], _handle_tx))
+    application.add_handler(
+        CommandHandler(["gasalert", "gas_sub"], partial(_handle_subscribe, direction="below"))
+    )
+    application.add_handler(
+        CommandHandler(["gasalertabove", "gas_sub_above"], partial(_handle_subscribe, direction="above"))
+    )
+    application.add_handler(CommandHandler(["cleargasalerts", "gas_clear"], _handle_clear))
+    application.add_handler(CommandHandler(["gasalerts", "gas_alerts"], _handle_list_gas_alerts))
+    for name, handler in SUBSCRIPTION_COMMANDS.items():
+        application.add_handler(CommandHandler(name, handler))
+    for name, handler in ADMIN_COMMANDS.items():
+        application.add_handler(CommandHandler(name, handler))
+    application.add_handler(
+        TypeHandler(Update, _log_incoming_update),
+        group=-1,
+    )
     application.add_handler(CallbackQueryHandler(_handle_gas_refresh, pattern=f"^{REFRESH_QUERY}$"))
 
+    application.add_handler(MessageHandler(filters.COMMAND, _handle_unknown_command), group=1)
     application.add_handler(
         MessageHandler(filters.TEXT & (~filters.COMMAND), _handle_text_query)
     )
+
+    registered: list[str] = []
+    known_commands: set[str] = set()
+    for group_index, handler_list in application.handlers.items():
+        for handler in handler_list:
+            if isinstance(handler, CommandHandler):
+                command_names = {str(cmd).lower() for cmd in handler.commands}
+                known_commands.update(command_names)
+                registered.append(f"group {group_index}: {sorted(handler.commands)}")
+    _LOGGER.info("Registered command handlers: %s", registered)
+
+    application.bot_data["known_commands"] = known_commands
 
     if application.job_queue is None:
         raise RuntimeError("JobQueue is unavailable. Install python-telegram-bot[job-queue] to enable scheduled tasks.")

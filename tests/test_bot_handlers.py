@@ -8,6 +8,7 @@ from mcp_app_telegram.bot import (
     _handle_gas,
     _handle_help,
     _handle_text_query,
+    _handle_unknown_command,
     TELEGRAM_COMMANDS,
 )
 from mcp_app_telegram.mcp_client import AccountSummary, EvmMcpClient, GasStats
@@ -29,6 +30,7 @@ def build_bot_data(client: StubEvmClient) -> dict:
         "mcp_registry": registry,
         "primary_evm_key": "evm",
         "network_client_map": {"base": "evm"},
+        "primary_evm_network": "base",
     }
 
 
@@ -51,6 +53,29 @@ class DummyContext:
     def __init__(self, args, bot_data):
         self.args = args
         self.application = DummyApplication(bot_data)
+
+
+@pytest.mark.asyncio
+async def test_unknown_command_is_suppressed_for_known_alias():
+    message = DummyMessage("/gas")
+    update = SimpleNamespace(effective_message=message)
+    context = DummyContext(args=[], bot_data={"known_commands": {"gas"}})
+
+    await _handle_unknown_command(update, context)
+
+    assert message.replies == []
+
+
+@pytest.mark.asyncio
+async def test_unknown_command_replies_for_unregistered():
+    message = DummyMessage("/notreal")
+    update = SimpleNamespace(effective_message=message)
+    context = DummyContext(args=[], bot_data={"known_commands": {"gas", "help"}})
+
+    await _handle_unknown_command(update, context)
+
+    assert message.replies
+    assert "Unknown command" in message.replies[0][0]
 
 
 @pytest.mark.asyncio
@@ -98,7 +123,7 @@ async def test_handle_gas_reports_stats():
     mcp_client.fetch_gas_stats.assert_awaited_once()
     assert message.replies
     text, markup = message.replies[0]
-    assert "Base Gas Stats" in text
+    assert "Base Gas Snapshot" in text
     assert markup is not None
 
 
@@ -115,7 +140,13 @@ async def test_handle_help_outputs_summary():
     assert "Send a normal message" in help_text
     assert "/gas" in help_text
     assert "/account" in help_text
-    assert "\n- /cleargasalerts" in help_text
+    assert "/transaction <hash> (alias /tx)" in help_text
+    assert "\n- /cleargasalerts (alias /gas_clear)" in help_text
+    assert "\n- /pairs" in help_text
+    assert "\n- /sub <index|pair>" in help_text
+    assert "\n- /unsub <index|pair>" in help_text
+    assert "\n- /suball" in help_text
+    assert "\n- /unsuball" in help_text
 
 
 @pytest.mark.asyncio

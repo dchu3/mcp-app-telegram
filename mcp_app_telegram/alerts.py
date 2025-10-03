@@ -25,7 +25,8 @@ class GasAlertSubscription:
 
     def describe(self) -> str:
         comparator = "≤" if self.direction == "below" else "≥"
-        return f"fast gas {comparator} {self.threshold:.2f} gwei on {self.network}"
+        network_label = self.network.replace("_", " ").replace("-", " ").title()
+        return f"fast gas {comparator} {self.threshold:.2f} gwei on {network_label}"
 
 
 class GasAlertManager:

@@ -39,7 +39,7 @@ async def test_agent_runs_gas_tool():
 
     client.fetch_gas_stats.assert_awaited_once()
     assert "Here are the latest gas metrics." in answer
-    assert "Base Gas Stats" in answer
+    assert "Gas Snapshot" in answer
 
 
 @pytest.mark.asyncio

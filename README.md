@@ -72,18 +72,33 @@ Use the helper script so the virtual environment is activated automatically:
 ```
 The bot starts long-polling until you press `Ctrl+C`. When running in MCP mode it automatically spawns the EVM MCP server via stdio; override the command with `MCP_EVM_SERVER_COMMAND` if you host your own build.
 
+### Registering commands only
+
+If you just want to verify Telegram command registration without starting any MCP servers, run:
+```bash
+./register_commands.py
+```
+The script looks for `TELEGRAM_MCP_BOT_TOKEN` and `TELEGRAM_CHAT_ID`, clears existing commands, and registers the bot command list across default, private, group, and chat scopes.
+
 ## Telegram Commands
 
-- `/help` – quick reference for all available commands.
-- Send a normal message – Gemini agent interprets the request and invokes an MCP tool when helpful.
-- `/gas` – current gas tiers, sequencer lag, and base fee for the default network.
-- `/account <address>` – account balance, nonce, and contract status (supports both MCP and JSON-RPC backends).
-- `/transaction <hash>` – summary of a transaction, including status and gas usage.
-- `/gasalert <network> <threshold>` / `/gasalertabove <network> <threshold>` – one-off alerts when fast gas drops below or rises above a threshold for the specified network.
-- `/cleargasalerts` – clear pending gas alerts for the chat.
-- `/gasalerts` – list every active gas alert tied to the chat.
+- `/help` – quick reference for all commands and aliases.
+- Send normal text – the Gemini agent (when enabled) inspects the prompt and calls the best MCP tool.
+- `/gas` – current gas tiers, sequencer lag, and base fee for the primary network.
+- `/account <address>` – balance, nonce, and contract flag for an address.
+- `/transaction <hash>` / `/tx <hash>` – full transaction status summary.
+- `/gasalert <network> <threshold>` / `/gas_sub ...` – alert when fast gas drops below a threshold.
+- `/gasalertabove <network> <threshold>` / `/gas_sub_above ...` – alert when fast gas rises above a threshold.
+- `/cleargasalerts` / `/gas_clear` – remove pending gas alerts for the chat.
+- `/gasalerts` / `/gas_alerts` – show the current alert subscriptions for the chat.
+- `/pairs` – list every tracked arbitrage pair with age metadata.
+- `/sub <index|pair>` – subscribe this chat to a tracked pair.
+- `/unsub <index|pair>` – remove a tracked pair subscription.
+- `/mysubs` – display the chat’s explicit subscriptions (and whether the global toggle is active).
+- `/suball` – subscribe the chat to all tracked pairs (if configuration allows).
+- `/unsuball` – clear the global subscription toggle.
 
-When a Gemini API key is configured the bot routes free-form chat messages through the agent, which picks between gas stats, account, and transaction lookups (and any additional tools you register). Without the API key the bot replies with setup guidance.
+Gemini-free installs still support every command above; only the free-form text routing falls back to a setup reminder when no Gemini API key is present.
 
 ## Testing
 
@@ -92,3 +107,35 @@ Run the full suite with:
 pytest
 ```
 All tests are async-friendly and mock external services.
+
+## Debugging Telegram Delivery
+
+When commands appear in Telegram but the bot never replies, verify the long-polling loop and clear any stale webhook or update backlog:
+
+1. Launch with verbose logging:
+   ```bash
+   LOG_LEVEL=DEBUG python -m mcp_app_telegram
+   ```
+   Successful startup prints:
+   - `Cleared existing Telegram webhook`
+   - `Starting Telegram long polling`
+   - `Telegram long polling started (running=True)`
+   - `Application worker tasks started`
+
+   The debug trace also shows recurring `getUpdates` calls. If these lines never appear or carry warnings, polling failed to initialize.
+
+2. Inspect pending updates in another shell:
+   ```bash
+   python get_updates.py
+   ```
+   Check `pending_update_count` and the most recent `update_id`. A large count means Telegram is still holding undelivered updates.
+
+3. Drain the backlog when needed:
+   ```bash
+   python drop_updates.py
+   ```
+   This advances the offset on Telegram’s side so the next polling cycle starts fresh.
+
+4. Resend `/help`. In debug mode you should see an `Incoming update: {...}` log entry as the handler fires. If the queue stays empty in `getUpdates`, ensure no webhook is registered (step 1) and that only a single process is polling the token.
+
+These utilities run entirely against the Bot API—no MCP servers or Gemini key required—so they are safe to use even in production.

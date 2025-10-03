@@ -228,11 +228,19 @@ class EvmMcpClient(McpClient):
         base_fee_wei = int(base_fee_hex, 16)
         base_fee_gwei = base_fee_wei / 1_000_000_000 if base_fee_wei else 0.0
 
-        timestamp_hex = str(block.get("timestamp") or "0x0")
-        try:
-            block_timestamp = int(timestamp_hex)
-        except ValueError:
-            block_timestamp = 0
+        timestamp_raw = block.get("timestamp") or "0x0"
+        block_timestamp = 0
+        if isinstance(timestamp_raw, int):
+            block_timestamp = timestamp_raw
+        elif isinstance(timestamp_raw, str):
+            timestamp_str = timestamp_raw.strip()
+            try:
+                if timestamp_str.lower().startswith("0x"):
+                    block_timestamp = int(timestamp_str, 16)
+                else:
+                    block_timestamp = int(timestamp_str)
+            except ValueError:
+                block_timestamp = 0
         block_lag = max(0.0, datetime.now(timezone.utc).timestamp() - block_timestamp) if block_timestamp else 0.0
 
         safe = max(base_fee_gwei * 1.05, base_fee_gwei)

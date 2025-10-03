@@ -6,6 +6,7 @@ import json
 import os
 import shlex
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, Final, Iterable, Mapping, Optional, Sequence, Tuple
 
 MCP_PROTOCOL_MCP = "mcp"
@@ -53,6 +54,31 @@ class Config:
     mcp_servers: Tuple[McpServerConfig, ...]
     primary_evm_server: str
     primary_dexscreener_server: Optional[str]
+    scan_pairs: Tuple["ScanPairDefinition", ...]
+    scan_size: int
+    allow_sub_all: bool
+    max_user_subs: int
+    swr_ttl: float
+    scan_cadence_hot: float
+    scan_cadence_warm: float
+    scan_cadence_cold: float
+    global_reqs_per_min: int
+    mev_buffer_bps: float
+    sequencer_lag_ms_suspend: int
+
+
+@dataclass(slots=True)
+class ScanPairDefinition:
+    """Declarative definition of a tracked market pair."""
+
+    pair_key: str
+    symbols: str
+    base_symbol: str
+    quote_symbol: str
+    base_address: Optional[str]
+    quote_address: Optional[str]
+    dex_id: Optional[str]
+    fee_tiers: Tuple[str, ...] = ()
 
 
 def _require_env(key: str) -> str:
@@ -261,6 +287,105 @@ def _resolve_primary_servers(servers: Sequence[McpServerConfig]) -> Tuple[str, O
     return str(primary_evm), str(primary_dex) if primary_dex is not None else None
 
 
+def _parse_bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ConfigError(f"Environment variable '{name}' must be a boolean flag")
+
+
+def _parse_positive_int(name: str, default: int, minimum: int = 0) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return max(default, minimum)
+    try:
+        value = int(raw)
+    except ValueError as exc:  # pragma: no cover - defensive guard
+        raise ConfigError(f"Environment variable '{name}' must be an integer") from exc
+    if value < minimum:
+        raise ConfigError(f"Environment variable '{name}' must be >= {minimum}")
+    return value
+
+
+def _parse_positive_float(name: str, default: float, minimum: float = 0.0) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return max(default, minimum)
+    try:
+        value = float(raw)
+    except ValueError as exc:  # pragma: no cover - defensive guard
+        raise ConfigError(f"Environment variable '{name}' must be a float") from exc
+    if value < minimum:
+        raise ConfigError(f"Environment variable '{name}' must be >= {minimum}")
+    return value
+
+
+def _load_scan_pairs_from_file(path: str) -> Tuple[ScanPairDefinition, ...]:
+    file_path = Path(path)
+    if not file_path.exists():
+        raise ConfigError(f"Scan set file '{path}' does not exist")
+
+    try:
+        payload = json.loads(file_path.read_text())
+    except json.JSONDecodeError as exc:  # pragma: no cover - depends on user edits
+        raise ConfigError(f"Scan set file '{path}' must be valid JSON") from exc
+
+    if not isinstance(payload, Sequence):
+        raise ConfigError("Scan set file must contain a list of pair definitions")
+
+    pairs: list[ScanPairDefinition] = []
+    for entry in payload:
+        if not isinstance(entry, Mapping):
+            raise ConfigError("Each scan set entry must be a JSON object")
+
+        pair_key = str(entry.get("pair_key") or entry.get("key") or "").strip()
+        if not pair_key:
+            raise ConfigError("Scan set entries require a 'pair_key'")
+        symbols = str(entry.get("symbols") or entry.get("pair") or "").strip()
+        base_symbol = str(entry.get("base_symbol") or entry.get("base") or "").strip()
+        quote_symbol = str(entry.get("quote_symbol") or entry.get("quote") or "").strip()
+
+        def _normalize_address(value: Optional[str]) -> Optional[str]:
+            if value is None:
+                return None
+            value = str(value).strip()
+            if not value:
+                return None
+            return value
+
+        base_address = _normalize_address(entry.get("base_address"))
+        quote_address = _normalize_address(entry.get("quote_address"))
+        dex_id = _normalize_address(entry.get("dex_id"))
+
+        fee_tiers_raw = entry.get("fee_tiers") or entry.get("fees") or ()
+        if isinstance(fee_tiers_raw, Sequence) and not isinstance(fee_tiers_raw, (str, bytes)):
+            fee_tiers = tuple(str(item).strip() for item in fee_tiers_raw if str(item).strip())
+        elif fee_tiers_raw:
+            fee_tiers = (str(fee_tiers_raw).strip(),)
+        else:
+            fee_tiers = ()
+
+        pairs.append(
+            ScanPairDefinition(
+                pair_key=pair_key,
+                symbols=symbols or pair_key,
+                base_symbol=base_symbol or symbols.split("/")[0] if symbols else pair_key,
+                quote_symbol=quote_symbol or (symbols.split("/")[1] if "/" in symbols else ""),
+                base_address=base_address,
+                quote_address=quote_address,
+                dex_id=dex_id,
+                fee_tiers=fee_tiers,
+            )
+        )
+
+    return tuple(pairs)
+
+
 def load_config() -> Config:
     token = _require_env("TELEGRAM_MCP_BOT_TOKEN")
     chat_id_raw = _require_env("TELEGRAM_CHAT_ID")
@@ -287,6 +412,22 @@ def load_config() -> Config:
         or "You are an on-chain analyst for the Base network. Be concise, factual, and focus on actionable network and market data."
     ).strip()
 
+    scan_size = _parse_positive_int("SCAN_SIZE", 10, minimum=1)
+    scan_set_path = os.getenv("SCAN_SET_PATH", "config/scan_set.json")
+    scan_pairs = _load_scan_pairs_from_file(scan_set_path)
+    if scan_pairs and scan_size > len(scan_pairs):
+        scan_size = len(scan_pairs)
+
+    allow_sub_all = _parse_bool_env("ALLOW_SUB_ALL", True)
+    max_user_subs = _parse_positive_int("MAX_USER_SUBS", 10, minimum=0)
+    swr_ttl = _parse_positive_float("SWR_TTL", 15.0, minimum=0.1)
+    scan_cadence_hot = _parse_positive_float("SCAN_CADENCE_HOT", 8.0, minimum=0.1)
+    scan_cadence_warm = _parse_positive_float("SCAN_CADENCE_WARM", 24.0, minimum=0.1)
+    scan_cadence_cold = _parse_positive_float("SCAN_CADENCE_COLD", 60.0, minimum=0.1)
+    global_reqs_per_min = _parse_positive_int("GLOBAL_REQS_PER_MIN", 120, minimum=1)
+    mev_buffer_bps = _parse_positive_float("MEV_BUFFER_BPS", 10.0, minimum=0.0)
+    sequencer_lag_ms_suspend = _parse_positive_int("SEQUENCER_LAG_MS_SUSPEND", 1500, minimum=0)
+
     return Config(
         telegram_bot_token=token,
         telegram_chat_id=chat_id,
@@ -299,4 +440,15 @@ def load_config() -> Config:
         mcp_servers=servers,
         primary_evm_server=primary_evm,
         primary_dexscreener_server=primary_dex,
+        scan_pairs=scan_pairs,
+        scan_size=scan_size,
+        allow_sub_all=allow_sub_all,
+        max_user_subs=max_user_subs,
+        swr_ttl=swr_ttl,
+        scan_cadence_hot=scan_cadence_hot,
+        scan_cadence_warm=scan_cadence_warm,
+        scan_cadence_cold=scan_cadence_cold,
+        global_reqs_per_min=global_reqs_per_min,
+        mev_buffer_bps=mev_buffer_bps,
+        sequencer_lag_ms_suspend=sequencer_lag_ms_suspend,
     )
