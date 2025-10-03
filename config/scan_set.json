@@ -1,0 +1,92 @@
+[
+  {
+    "pair_key": "base:0x957732f53824522fbc8f6f1d24a16fb0d32721c5/0xd9aaec86b65d86f6a7b5b1e63b5cbd748165cb39@aerodrome",
+    "symbols": "AVNT/USDbC",
+    "base_symbol": "AVNT",
+    "quote_symbol": "USDbC",
+    "base_address": "0x957732f53824522fbc8f6f1d24a16fb0d32721c5",
+    "quote_address": "0xd9aaec86b65d86f6a7b5b1e63b5cbd748165cb39",
+    "dex_id": "aerodrome",
+    "fee_tiers": ["0.05"]
+  },
+  {
+    "pair_key": "base:0x940181a94a35a4569e4529a3cdfb74e38fd98631/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913@aerodrome",
+    "symbols": "AERO/USDC",
+    "base_symbol": "AERO",
+    "quote_symbol": "USDC",
+    "base_address": "0x940181a94a35a4569e4529a3cdfb74e38fd98631",
+    "quote_address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+    "dex_id": "aerodrome",
+    "fee_tiers": ["0.30"]
+  },
+  {
+    "pair_key": "base:0x4ed4e862860bed51a9570b96d89af5e1b0efefed/0x4200000000000000000000000000000000000006@pancakeswap",
+    "symbols": "DEGEN/WETH",
+    "base_symbol": "DEGEN",
+    "quote_symbol": "WETH",
+    "base_address": "0x4ed4e862860bed51a9570b96d89af5e1b0efefed",
+    "quote_address": "0x4200000000000000000000000000000000000006",
+    "dex_id": "pancakeswap",
+    "fee_tiers": ["0.30"]
+  },
+  {
+    "pair_key": "base:0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913@aerodrome",
+    "symbols": "cbBTC/USDC",
+    "base_symbol": "cbBTC",
+    "quote_symbol": "USDC",
+    "base_address": "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf",
+    "quote_address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+    "dex_id": "aerodrome",
+    "fee_tiers": ["0.30"]
+  },
+  {
+    "pair_key": "base:0x1111111111166b7fe7bd91427724b487980afc69/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913@aerodrome",
+    "symbols": "ZORA/USDC",
+    "base_symbol": "ZORA",
+    "quote_symbol": "USDC",
+    "base_address": "0x1111111111166b7fe7bd91427724b487980afc69",
+    "quote_address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+    "dex_id": "aerodrome",
+    "fee_tiers": ["0.30"]
+  },
+  {
+    "pair_key": "base:0x0b3e328455c4059eeb9e3f84b5543f74e24e7e1b/0x4200000000000000000000000000000000000006@aerodrome",
+    "symbols": "VIRTUAL/WETH",
+    "base_symbol": "VIRTUAL",
+    "quote_symbol": "WETH",
+    "base_address": "0x0b3e328455c4059eeb9e3f84b5543f74e24e7e1b",
+    "quote_address": "0x4200000000000000000000000000000000000006",
+    "dex_id": "aerodrome",
+    "fee_tiers": ["0.30"]
+  },
+  {
+    "pair_key": "base:0x532f27101965dd16442e59d40670faf5ebb142e4/0x4200000000000000000000000000000000000006@aerodrome",
+    "symbols": "BRETT/WETH",
+    "base_symbol": "BRETT",
+    "quote_symbol": "WETH",
+    "base_address": "0x532f27101965dd16442e59d40670faf5ebb142e4",
+    "quote_address": "0x4200000000000000000000000000000000000006",
+    "dex_id": "aerodrome",
+    "fee_tiers": ["0.30"]
+  },
+  {
+    "pair_key": "base:0x63706e401c06ac8513145b7687a14804d17f814b/0x4200000000000000000000000000000000000006@pancakeswap",
+    "symbols": "AAVE/WETH",
+    "base_symbol": "AAVE",
+    "quote_symbol": "WETH",
+    "base_address": "0x63706e401c06ac8513145b7687a14804d17f814b",
+    "quote_address": "0x4200000000000000000000000000000000000006",
+    "dex_id": "pancakeswap",
+    "fee_tiers": ["0.30"]
+  },
+  {
+    "pair_key": "base:0xa99f6e6785da0f5d6fb42495fe424bce029eeb3e/0x4200000000000000000000000000000000000006@aerodrome",
+    "symbols": "PENDLE/WETH",
+    "base_symbol": "PENDLE",
+    "quote_symbol": "WETH",
+    "base_address": "0xa99f6e6785da0f5d6fb42495fe424bce029eeb3e",
+    "quote_address": "0x4200000000000000000000000000000000000006",
+    "dex_id": "aerodrome",
+    "fee_tiers": ["0.30"]
+  }
+]

@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import Iterable, Mapping, Any, Optional, Sequence
 
+from .arb.signals import ArbSignal
+from .infra.store import PairMetadata
 from .mcp_client import AccountSummary, GasStats, TransactionSummary
 
 
@@ -30,9 +32,18 @@ def _format_wei(value: int) -> str:
     return f"{value} wei"
 
 
-def format_gas_stats(stats: GasStats) -> str:
+def _format_network_label(network: Optional[str]) -> Optional[str]:
+    if not network:
+        return None
+    cleaned = network.replace("_", " ").replace("-", " ").strip()
+    return cleaned.title() or None
+
+
+def format_gas_stats(stats: GasStats, *, network: Optional[str] = None) -> str:
+    label = _format_network_label(network)
+    header = f"⚡️ {label} Gas Snapshot" if label else "⚡️ Gas Snapshot"
     lines = [
-        "⚡️ Base Gas Stats",
+        header,
         f"Safe: {_format_gwei(stats.safe)} gwei",
         f"Standard: {_format_gwei(stats.standard)} gwei",
         f"Fast: {_format_gwei(stats.fast)} gwei",
@@ -43,7 +54,7 @@ def format_gas_stats(stats: GasStats) -> str:
 
 
 def format_transaction(summary: TransactionSummary) -> str:
-    value_line = f"Value: {summary.value_wei} wei" if summary.value_wei is not None else "Value: n/a"
+    value_text = _format_wei(summary.value_wei) if summary.value_wei is not None else "n/a"
     lines: Iterable[str] = (
         "📦 Transaction Summary",
         f"Hash: {summary.hash}",
@@ -52,7 +63,7 @@ def format_transaction(summary: TransactionSummary) -> str:
         f"To: {summary.to_address or 'Contract creation'}",
         f"Gas used: {summary.gas_used or 'n/a'}",
         f"Nonce: {summary.nonce or 'n/a'}",
-        value_line,
+        f"Value: {value_text}",
     )
     return "\n".join(lines)
 
@@ -89,6 +100,10 @@ def _safe_float(value: Any) -> Optional[float]:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _format_bps(value: float) -> str:
+    return f"{value:.1f}"
 
 
 def format_dexscreener_pairs(result: Any) -> Optional[str]:
@@ -266,4 +281,46 @@ def format_dexscreener_orders(orders: Sequence[Any]) -> Optional[str]:
     if len(valid) > 5:
         lines.append(f"…and {len(valid) - 5} more orders.")
 
+    return "\n".join(lines)
+
+
+def format_arb_signal(
+    *,
+    metadata: PairMetadata,
+    signal: ArbSignal,
+    payload: Mapping[str, Any],
+    age_seconds: float,
+    stale: bool,
+) -> str:
+    buy_url = payload.get("buy_url") if isinstance(payload.get("buy_url"), str) else None
+    sell_url = payload.get("sell_url") if isinstance(payload.get("sell_url"), str) else None
+
+    gross_bps = _format_bps(signal.costs.gross_bps)
+    net_bps = _format_bps(signal.costs.net_bps)
+    lp_fee_bps = _format_bps(signal.costs.lp_fee_bps)
+    slippage_bps = _format_bps(signal.costs.slippage_bps)
+    gas_bps = _format_bps(signal.costs.gas_bps)
+    mev_bps = _format_bps(signal.costs.mev_buffer_bps)
+
+    lines = [
+        f"🛰️ Arbitrage Signal — {metadata.symbols}",
+        f"Size €{signal.size_eur:,.0f}",
+        (
+            f"Venues: buy {signal.buy_leg.venue} ({_format_bps(signal.buy_leg.fee_bps)} bps)"
+            f" → sell {signal.sell_leg.venue} ({_format_bps(signal.sell_leg.fee_bps)} bps)"
+        ),
+        f"Gross {gross_bps} bps | Net {net_bps} bps (€{signal.costs.net_eur:,.2f})",
+        (
+            "Costs: "
+            f"LP {lp_fee_bps} bps | Slippage {slippage_bps} bps | "
+            f"Gas €{signal.costs.gas_cost_eur:.2f} ({gas_bps} bps) | MEV buffer {mev_bps} bps"
+        ),
+        f"Confidence {signal.confidence:.2f} | Data age {int(age_seconds)}s",
+    ]
+    if stale:
+        lines.append("⚠ SWR (stale) data")
+    if buy_url:
+        lines.append(f"Buy: {buy_url}")
+    if sell_url and sell_url != buy_url:
+        lines.append(f"Sell: {sell_url}")
     return "\n".join(lines)
