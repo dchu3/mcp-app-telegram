@@ -31,6 +31,9 @@ def _reset_legacy_env(monkeypatch):
     monkeypatch.delenv("TELEGRAM_HTTP_READ_TIMEOUT", raising=False)
     monkeypatch.delenv("TELEGRAM_HTTP_CONNECT_TIMEOUT", raising=False)
     monkeypatch.delenv("GEMINI_MODEL", raising=False)
+    monkeypatch.delenv("ARB_MIN_LIQUIDITY_USD", raising=False)
+    monkeypatch.delenv("ARB_MIN_VOLUME_24H_USD", raising=False)
+    monkeypatch.delenv("ARB_MIN_TXNS_24H", raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -51,6 +54,9 @@ def test_load_config_defaults(monkeypatch):
     assert config.primary_dexscreener_server is None
     assert config.gas_alert_threshold is None
     assert config.gemini_model == DEFAULT_GEMINI_MODEL
+    assert config.min_liquidity_usd == pytest.approx(50_000.0)
+    assert config.min_volume_24h_usd == pytest.approx(100_000.0)
+    assert config.min_txns_24h == 2_400
 
     assert len(config.mcp_servers) == 1
     server = config.mcp_servers[0]
@@ -67,6 +73,9 @@ def test_load_config_with_optional(monkeypatch):
     monkeypatch.setenv("TELEGRAM_HTTP_READ_TIMEOUT", "20")
     monkeypatch.setenv("TELEGRAM_HTTP_CONNECT_TIMEOUT", "7")
     monkeypatch.setenv("GEMINI_MODEL", "demo-model")
+    monkeypatch.setenv("ARB_MIN_LIQUIDITY_USD", "12345")
+    monkeypatch.setenv("ARB_MIN_VOLUME_24H_USD", "67890")
+    monkeypatch.setenv("ARB_MIN_TXNS_24H", "789")
 
     config = load_config()
 
@@ -74,6 +83,9 @@ def test_load_config_with_optional(monkeypatch):
     assert config.telegram_read_timeout == pytest.approx(20.0)
     assert config.telegram_connect_timeout == pytest.approx(7.0)
     assert config.gemini_model == "demo-model"
+    assert config.min_liquidity_usd == pytest.approx(12345.0)
+    assert config.min_volume_24h_usd == pytest.approx(67890.0)
+    assert config.min_txns_24h == 789
 
     server = config.mcp_servers[0]
     assert server.base_url == "https://example.com"

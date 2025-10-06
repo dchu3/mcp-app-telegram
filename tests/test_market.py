@@ -64,6 +64,9 @@ async def test_market_fetcher_produces_payload():
                 "priceUsd": "1.00",
                 "url": "https://dexA",
                 "quoteToken": {"address": "0xquote"},
+                "liquidity": {"usd": 75_000},
+                "volume": {"h24": 150_000},
+                "txns": {"h24": {"buys": 1_300, "sells": 1_400}},
             },
             {
                 "chainId": "base",
@@ -71,6 +74,9 @@ async def test_market_fetcher_produces_payload():
                 "priceUsd": "1.02",
                 "url": "https://dexB",
                 "quoteToken": {"address": "0xquote"},
+                "liquidity": {"usd": 120_000},
+                "volume": {"h24": 250_000},
+                "txns": {"h24": {"buys": 1_500, "sells": 1_600}},
             },
         ]
     }
@@ -84,6 +90,9 @@ async def test_market_fetcher_produces_payload():
         StubEvmClient(),
         default_size_eur=500.0,
         mev_buffer_bps=10.0,
+        min_liquidity_usd=50_000.0,
+        min_volume_24h_usd=100_000.0,
+        min_txns_24h=2_400,
         http_client=http_client,
     )
     result = await fetcher.fetch_pair(metadata)
@@ -108,7 +117,14 @@ async def test_market_fetcher_handles_insufficient_pairs():
     )
     http_client = StubHttpClient([
         ("https://api.dexscreener.com", {"pairs": [
-            {"chainId": "base", "priceUsd": "1.00", "quoteToken": {"address": "0xquote"}}
+            {
+                "chainId": "base",
+                "priceUsd": "1.00",
+                "quoteToken": {"address": "0xquote"},
+                "liquidity": {"usd": 80_000},
+                "volume": {"h24": 200_000},
+                "txns": {"h24": {"buys": 1_500, "sells": 1_500}},
+            }
         ]}),
         ("https://api.coingecko.com", {"ethereum": {"eur": 2000}}),
     ])
@@ -116,11 +132,72 @@ async def test_market_fetcher_handles_insufficient_pairs():
         StubEvmClient(),
         default_size_eur=500.0,
         mev_buffer_bps=10.0,
+        min_liquidity_usd=50_000.0,
+        min_volume_24h_usd=100_000.0,
+        min_txns_24h=2_400,
         http_client=http_client,
     )
     result = await fetcher.fetch_pair(metadata)
     assert result.status == "stale"
     assert "error" in result.payload
+    await fetcher.close()
+
+
+@pytest.mark.asyncio
+async def test_market_fetcher_filters_pairs_below_thresholds():
+    metadata = PairMetadata(
+        pair_key="base:token/quote@dex",
+        symbols="TK/USDC",
+        base_symbol="TK",
+        quote_symbol="USDC",
+        base_address="0xbase",
+        quote_address="0xquote",
+        dex_id="dex",
+        fee_tiers=("0.05",),
+    )
+
+    dex_payload = {
+        "pairs": [
+            {
+                "chainId": "base",
+                "dexId": "dexLowLiq",
+                "priceUsd": "1.01",
+                "url": "https://lowLiq",
+                "quoteToken": {"address": "0xquote"},
+                "liquidity": {"usd": 20_000},
+                "volume": {"h24": 150_000},
+                "txns": {"h24": {"buys": 1_400, "sells": 1_300}},
+            },
+            {
+                "chainId": "base",
+                "dexId": "dexLowTx",
+                "priceUsd": "1.03",
+                "url": "https://lowTx",
+                "quoteToken": {"address": "0xquote"},
+                "liquidity": {"usd": 80_000},
+                "volume": {"h24": 90_000},
+                "txns": {"h24": {"buys": 900, "sells": 1_000}},
+            },
+        ]
+    }
+    http_client = StubHttpClient([
+        ("https://api.dexscreener.com", dex_payload),
+        ("https://api.coingecko.com", {"ethereum": {"eur": 2000}}),
+    ])
+
+    fetcher = MarketDataFetcher(
+        StubEvmClient(),
+        default_size_eur=500.0,
+        mev_buffer_bps=10.0,
+        min_liquidity_usd=50_000.0,
+        min_volume_24h_usd=100_000.0,
+        min_txns_24h=2_400,
+        http_client=http_client,
+    )
+
+    result = await fetcher.fetch_pair(metadata)
+    assert result.status == "stale"
+    assert "market filters" in result.payload.get("error", "")
     await fetcher.close()
 
 

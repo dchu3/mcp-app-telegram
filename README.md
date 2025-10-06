@@ -34,6 +34,7 @@ Async Telegram bot that surfaces Base Chain data through the MCP EVM server (or 
    - `GEMINI_MODEL` – override the Gemini model used for Gemini-powered responses (default `gemini-1.5-flash-latest`).
    - `GEMINI_PERSONA` – optional system prompt to shape the agent's voice/persona.
    - `TELEGRAM_HTTP_READ_TIMEOUT` / `TELEGRAM_HTTP_CONNECT_TIMEOUT` – override Telegram HTTP timeouts.
+   - `ARB_MIN_LIQUIDITY_USD` / `ARB_MIN_VOLUME_24H_USD` / `ARB_MIN_TXNS_24H` – enforce per-venue liquidity, 24h volume (USD), and 24h transaction minimums before an arbitrage snapshot is considered (defaults: 50k / 100k / 2,400).
    - Legacy environment variables (`MCP_EVM_BASE_URL`, `MCP_EVM_PROTOCOL`, `MCP_EVM_SERVER_COMMAND`, `MCP_EVM_NETWORK`, `DEXSCREENER_MCP_*`) remain supported and populate a single-server configuration when `MCP_SERVERS` is not set.
 
    Example `MCP_SERVERS` payload:
@@ -92,7 +93,7 @@ The script looks for `TELEGRAM_MCP_BOT_TOKEN` and `TELEGRAM_CHAT_ID`, clears exi
 - `/cleargasalerts` / `/gas_clear` – remove pending gas alerts for the chat.
 - `/gasalerts` / `/gas_alerts` – show the current alert subscriptions for the chat.
 - `/pairs` – list every tracked arbitrage pair with age metadata.
-- `/sub <index|pair>` – subscribe this chat to a tracked pair.
+- `/sub <index|pair>` – subscribe this chat to a tracked pair (`/pairs` shows the 1-based index and the literal `pair_key`, e.g. `/sub 1` or `/sub base:foo/usdc@dex`).
 - `/unsub <index|pair>` – remove a tracked pair subscription.
 - `/mysubs` – display the chat’s explicit subscriptions (and whether the global toggle is active).
 - `/suball` – subscribe the chat to all tracked pairs (if configuration allows).
