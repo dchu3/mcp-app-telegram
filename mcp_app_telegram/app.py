@@ -161,6 +161,9 @@ async def run() -> None:
         evm_client,
         default_size_eur=default_profile.test_size_eur,
         mev_buffer_bps=config.mev_buffer_bps,
+        min_liquidity_usd=config.min_liquidity_usd,
+        min_volume_24h_usd=config.min_volume_24h_usd,
+        min_txns_24h=config.min_txns_24h,
     )
 
     scheduler = CentralScheduler(

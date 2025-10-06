@@ -1,6 +1,6 @@
 {
   "scan_set": [
-    "base:0x957732f53824522fbc8f6f1d24a16fb0d32721c5/0xd9aaec86b65d86f6a7b5b1e63b5cbd748165cb39@aerodrome",
+    "base:0x696f9436b67233384889472cd7cd58a6fb5df4f1/0x4200000000000000000000000000000000000006@pancakeswap",
     "base:0x940181a94a35a4569e4529a3cdfb74e38fd98631/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913@aerodrome",
     "base:0x4ed4e862860bed51a9570b96d89af5e1b0efefed/0x4200000000000000000000000000000000000006@pancakeswap",
     "base:0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913@aerodrome",
@@ -12,15 +12,15 @@
   ],
   "pair_meta": [
     {
-      "pair_key": "base:0x957732f53824522fbc8f6f1d24a16fb0d32721c5/0xd9aaec86b65d86f6a7b5b1e63b5cbd748165cb39@aerodrome",
-      "symbols": "AVNT/USDbC",
+      "pair_key": "base:0x696f9436b67233384889472cd7cd58a6fb5df4f1/0x4200000000000000000000000000000000000006@pancakeswap",
+      "symbols": "AVNT/WETH",
       "base_symbol": "AVNT",
-      "quote_symbol": "USDbC",
-      "base_address": "0x957732f53824522fbc8f6f1d24a16fb0d32721c5",
-      "quote_address": "0xd9aaec86b65d86f6a7b5b1e63b5cbd748165cb39",
-      "dex_id": "aerodrome",
+      "quote_symbol": "WETH",
+      "base_address": "0x696f9436b67233384889472cd7cd58a6fb5df4f1",
+      "quote_address": "0x4200000000000000000000000000000000000006",
+      "dex_id": "pancakeswap",
       "fee_tiers": [
-        "0.05"
+        "0.30"
       ]
     },
     {
@@ -121,7 +121,9 @@
     }
   ],
   "subs_by_pair": {},
-  "subs_all": [],
+  "subs_all": [
+    7540643505
+  ],
   "subs_by_user": {},
   "profiles": {}
 }

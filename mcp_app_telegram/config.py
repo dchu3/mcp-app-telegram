@@ -65,6 +65,9 @@ class Config:
     global_reqs_per_min: int
     mev_buffer_bps: float
     sequencer_lag_ms_suspend: int
+    min_liquidity_usd: float
+    min_volume_24h_usd: float
+    min_txns_24h: int
 
 
 @dataclass(slots=True)
@@ -427,6 +430,9 @@ def load_config() -> Config:
     global_reqs_per_min = _parse_positive_int("GLOBAL_REQS_PER_MIN", 120, minimum=1)
     mev_buffer_bps = _parse_positive_float("MEV_BUFFER_BPS", 10.0, minimum=0.0)
     sequencer_lag_ms_suspend = _parse_positive_int("SEQUENCER_LAG_MS_SUSPEND", 1500, minimum=0)
+    min_liquidity_usd = _parse_positive_float("ARB_MIN_LIQUIDITY_USD", 50_000.0, minimum=0.0)
+    min_volume_24h_usd = _parse_positive_float("ARB_MIN_VOLUME_24H_USD", 100_000.0, minimum=0.0)
+    min_txns_24h = _parse_positive_int("ARB_MIN_TXNS_24H", 2_400, minimum=0)
 
     return Config(
         telegram_bot_token=token,
@@ -451,4 +457,7 @@ def load_config() -> Config:
         global_reqs_per_min=global_reqs_per_min,
         mev_buffer_bps=mev_buffer_bps,
         sequencer_lag_ms_suspend=sequencer_lag_ms_suspend,
+        min_liquidity_usd=min_liquidity_usd,
+        min_volume_24h_usd=min_volume_24h_usd,
+        min_txns_24h=min_txns_24h,
     )

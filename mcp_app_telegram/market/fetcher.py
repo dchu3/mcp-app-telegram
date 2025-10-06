@@ -40,12 +40,18 @@ class MarketDataFetcher:
         *,
         default_size_eur: float,
         mev_buffer_bps: float,
+        min_liquidity_usd: float,
+        min_volume_24h_usd: float,
+        min_txns_24h: int,
         timeout: float = 10.0,
         http_client: Optional[httpx.AsyncClient] = None,
     ) -> None:
         self._evm_client = evm_client
         self._default_size_eur = default_size_eur
         self._mev_buffer_bps = mev_buffer_bps
+        self._min_liquidity_usd = max(0.0, float(min_liquidity_usd))
+        self._min_volume_24h_usd = max(0.0, float(min_volume_24h_usd))
+        self._min_txns_24h = max(0, int(min_txns_24h))
         self._client = http_client or httpx.AsyncClient(timeout=timeout)
         self._owns_client = http_client is None
         self._eth_price_cache: tuple[float, float] = (0.0, 0.0)  # (timestamp, price)
@@ -96,7 +102,7 @@ class MarketDataFetcher:
             raise ValueError("pair definition missing base token address")
 
         pairs = await self._fetch_dexscreener_pairs(metadata.base_address)
-        filtered = []
+        eligible: list[tuple[Mapping[str, Any], float]] = []
         for pair in pairs:
             if pair.get("chainId") != "base":
                 continue
@@ -104,20 +110,20 @@ class MarketDataFetcher:
             quote_addr = str(quote.get("address") or "").lower()
             if metadata.quote_address and quote_addr != metadata.quote_address.lower():
                 continue
-            price_usd = float(pair.get("priceUsd") or 0.0)
+            price_usd = self._safe_float(pair.get("priceUsd"))
             if price_usd <= 0:
                 continue
-            filtered.append(pair)
+            if not self._meets_market_filters(pair):
+                continue
+            eligible.append((pair, price_usd))
 
-        if len(filtered) < 2:
-            raise RuntimeError("insufficient venues for spread calculation")
+        if len(eligible) < 2:
+            raise RuntimeError("insufficient venues after applying market filters")
 
-        filtered.sort(key=lambda item: float(item.get("priceUsd") or 0.0))
-        buy = filtered[0]
-        sell = filtered[-1]
+        eligible.sort(key=lambda item: item[1])
+        buy, buy_price = eligible[0]
+        sell, sell_price = eligible[-1]
 
-        buy_price = float(buy.get("priceUsd") or 0.0)
-        sell_price = float(sell.get("priceUsd") or 0.0)
         if buy_price <= 0 or sell_price <= 0:
             raise RuntimeError("invalid price data returned")
 
@@ -145,6 +151,43 @@ class MarketDataFetcher:
                 "sell_url": sell.get("url"),
             },
         )
+
+    def _meets_market_filters(self, pair: Mapping[str, Any]) -> bool:
+        liquidity = self._safe_float((pair.get("liquidity") or {}).get("usd"))
+        if liquidity < self._min_liquidity_usd:
+            return False
+        volume_24h = self._safe_float((pair.get("volume") or {}).get("h24"))
+        if volume_24h < self._min_volume_24h_usd:
+            return False
+        txns_24h = self._extract_txns_24h(pair.get("txns"))
+        if txns_24h < self._min_txns_24h:
+            return False
+        return True
+
+    @staticmethod
+    def _safe_float(value: Any) -> float:
+        try:
+            result = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        if math.isnan(result) or math.isinf(result):
+            return 0.0
+        return result
+
+    def _extract_txns_24h(self, txns_payload: Any) -> int:
+        if not isinstance(txns_payload, Mapping):
+            return 0
+        h24 = txns_payload.get("h24")
+        if isinstance(h24, Mapping):
+            total = self._safe_float(h24.get("total"))
+            if total > 0:
+                return int(total)
+            buys = self._safe_float(h24.get("buys"))
+            sells = self._safe_float(h24.get("sells"))
+            aggregate = buys + sells
+            return int(aggregate) if aggregate > 0 else 0
+        value = self._safe_float(h24)
+        return int(value) if value > 0 else 0
 
     async def _fetch_dexscreener_pairs(self, base_address: str) -> Sequence[Mapping[str, Any]]:
         url = DEXSCREENER_TOKEN_URL.format(address=base_address)
