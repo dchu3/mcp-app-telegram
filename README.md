@@ -31,7 +31,7 @@ Async Telegram bot that surfaces Base Chain data through the MCP EVM server (or 
    - `MCP_SERVERS` – JSON array of MCP server definitions (see below) when running multiple integrations.
    - `MCP_PRIMARY_EVM` / `MCP_PRIMARY_DEXSCREENER` – pick the default server keys for bot commands.
    - `COINGECKO_PRO_API_KEY` / `COINGECKO_API_KEY` – when set, automatically enables the Coingecko MCP server (override command with `COINGECKO_MCP_COMMAND`).
-   - `GEMINI_MODEL` – override the Gemini model used for Gemini-powered responses (default `gemini-1.5-flash-latest`).
+   - `GEMINI_MODEL_MCP` – override the Gemini model used for Gemini-powered responses (default `gemini-1.5-flash-latest`).
    - `GEMINI_PERSONA` – optional system prompt to shape the agent's voice/persona.
    - `TELEGRAM_HTTP_READ_TIMEOUT` / `TELEGRAM_HTTP_CONNECT_TIMEOUT` – override Telegram HTTP timeouts.
    - `ARB_MIN_LIQUIDITY_USD` / `ARB_MIN_VOLUME_24H_USD` / `ARB_MIN_TXNS_24H` – enforce per-venue liquidity, 24h volume (USD), and 24h transaction minimums before an arbitrage snapshot is considered (defaults: 50k / 100k / 2,400).

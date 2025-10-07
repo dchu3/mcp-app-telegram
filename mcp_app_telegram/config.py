@@ -409,7 +409,9 @@ def load_config() -> Config:
     primary_evm, primary_dex = _resolve_primary_servers(servers)
 
     gemini_api_key = os.getenv("GEMINI_API_KEY")
-    gemini_model = os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip() or DEFAULT_GEMINI_MODEL
+    gemini_model = (
+        os.getenv("GEMINI_MODEL_MCP", DEFAULT_GEMINI_MODEL).strip() or DEFAULT_GEMINI_MODEL
+    )
     gemini_persona = (
         os.getenv("GEMINI_PERSONA")
         or "You are an on-chain analyst for the Base network. Be concise, factual, and focus on actionable network and market data."
