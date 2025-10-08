@@ -46,16 +46,16 @@ REFRESH_QUERY = "gas_refresh"
 TELEGRAM_COMMANDS = [
     BotCommand("help", "Show available commands"),
     BotCommand("gas", "Show Base gas stats"),
-    BotCommand("account", "Show account balance and nonce"),
-    BotCommand("transaction", "Summarize transaction status"),
-    BotCommand("tx", "Alias for /transaction"),
-    BotCommand("gasalert", "Alert when fast gas drops below threshold"),
-    BotCommand("gasalertabove", "Alert when fast gas rises above threshold"),
-    BotCommand("cleargasalerts", "Clear gas alerts for this chat"),
-    BotCommand("gasalerts", "List active gas alerts for this chat"),
-    BotCommand("gas_sub", "Alias for /gasalert"),
-    BotCommand("gas_sub_above", "Alias for /gasalertabove"),
-    BotCommand("gas_clear", "Alias for /cleargasalerts"),
+    # BotCommand("account", "Show account balance and nonce"),
+    # BotCommand("transaction", "Summarize transaction status"),
+    # BotCommand("tx", "Alias for /transaction"),
+    # BotCommand("gasalert", "Alert when fast gas drops below threshold"),
+    # BotCommand("gasalertabove", "Alert when fast gas rises above threshold"),
+    # BotCommand("cleargasalerts", "Clear gas alerts for this chat"),
+    # BotCommand("gasalerts", "List active gas alerts for this chat"),
+    # BotCommand("gas_sub", "Alias for /gasalert"),
+    # BotCommand("gas_sub_above", "Alias for /gasalertabove"),
+    # BotCommand("gas_clear", "Alias for /cleargasalerts"),
     BotCommand("pairs", "List tracked arbitrage pairs"),
     BotCommand("sub", "Subscribe to a tracked pair"),
     BotCommand("unsub", "Remove a pair subscription"),
@@ -76,12 +76,6 @@ _HELP_TEXT = (
     "Here are the commands I understand:\n"
     "- Send a normal message: Gemini agent picks an MCP tool to answer.\n"
     "- /gas : Base gas tiers, base fee, and sequencer lag.\n"
-    "- /account <address> : Balance, nonce, and contract status for an address.\n"
-    "- /transaction <hash> (alias /tx) : Transaction status, gas used, and value.\n"
-    "- /gasalert <network> <gwei> (alias /gas_sub) : Alert when fast gas drops below a threshold.\n"
-    "- /gasalertabove <network> <gwei> (alias /gas_sub_above) : Alert when fast gas rises above a threshold.\n"
-    "- /cleargasalerts (alias /gas_clear) : Clear pending gas alerts in this chat.\n"
-    "- /gasalerts : List active gas alerts in this chat.\n"
     "- /pairs : List tracked arbitrage pairs with realtime age.\n"
     "- /sub <index|pair> : Subscribe to a tracked pair.\n"
     "- /unsub <index|pair> : Remove a tracked pair subscription.\n"
