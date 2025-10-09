@@ -22,6 +22,7 @@ def _reset_legacy_env(monkeypatch):
     monkeypatch.delenv("DEXSCREENER_MCP_ROOT", raising=False)
     monkeypatch.delenv("DEXSCREENER_MCP_COMMAND", raising=False)
     monkeypatch.delenv("COINGECKO_MCP_COMMAND", raising=False)
+    monkeypatch.delenv("COINGECKO_MCP_ENABLED", raising=False)
     monkeypatch.delenv("COINGECKO_PRO_API_KEY", raising=False)
     monkeypatch.delenv("COINGECKO_API_KEY", raising=False)
     monkeypatch.delenv("COINGECKO_ENVIRONMENT", raising=False)
@@ -142,12 +143,31 @@ def test_load_config_with_dexscreener_command(monkeypatch):
 
 
 def test_load_config_with_coingecko(monkeypatch):
+    monkeypatch.setenv("COINGECKO_MCP_ENABLED", "true")
     monkeypatch.setenv("COINGECKO_API_KEY", "abc123")
     config = load_config()
 
     coingecko = next(srv for srv in config.mcp_servers if srv.kind == "coingecko")
     assert coingecko.server_command == ("npx", "-y", "@coingecko/coingecko-mcp")
     assert coingecko.env.get("COINGECKO_PRO_API_KEY") == "abc123"
+    assert coingecko.env.get("COINGECKO_ENVIRONMENT") == "demo"
+
+
+def test_coingecko_disabled_by_default(monkeypatch):
+    monkeypatch.setenv("COINGECKO_API_KEY", "abc123")
+
+    config = load_config()
+
+    assert all(srv.kind != "coingecko" for srv in config.mcp_servers)
+
+
+def test_coingecko_enabled_without_api_key(monkeypatch):
+    monkeypatch.setenv("COINGECKO_MCP_ENABLED", "1")
+
+    config = load_config()
+
+    coingecko = next(srv for srv in config.mcp_servers if srv.kind == "coingecko")
+    assert coingecko.env.get("COINGECKO_PRO_API_KEY") is None
     assert coingecko.env.get("COINGECKO_ENVIRONMENT") == "demo"
 
 

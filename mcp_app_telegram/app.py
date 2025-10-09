@@ -144,13 +144,16 @@ async def run() -> None:
     await store.load_snapshot()
     await store.initialize_pairs(config.scan_pairs, config.scan_size)
 
+    per_host_rates = {
+        "dexscreener": 60,
+        "evm": 45,
+    }
+    if coingecko_clients:
+        per_host_rates["coingecko"] = 30
+
     rate_limiter = RequestRateLimiter(
         global_rate_per_min=config.global_reqs_per_min,
-        per_host_rate_per_min={
-            "dexscreener": 60,
-            "evm": 45,
-            "coingecko": 30,
-        },
+        per_host_rate_per_min=per_host_rates,
     )
     swr_cache = SwrCache(store, default_ttl=config.swr_ttl)
 

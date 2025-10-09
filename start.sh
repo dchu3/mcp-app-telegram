@@ -54,19 +54,32 @@ else
 fi
 
 if [ "${SKIP_LOCAL_COINGECKO_MCP:-0}" != "1" ]; then
-  COINGECKO_KEY=${COINGECKO_PRO_API_KEY:-${COINGECKO_API_KEY:-}}
-  if ! command -v npx >/dev/null 2>&1; then
-    echo "Cannot start Coingecko MCP server because 'npx' is not available." >&2
+  case "${COINGECKO_MCP_ENABLED:-}" in
+    1|true|TRUE|on|ON|yes|YES)
+      COINGECKO_ENABLED=1
+      ;;
+    *)
+      COINGECKO_ENABLED=0
+      ;;
+  esac
+
+  if [ "$COINGECKO_ENABLED" != "1" ]; then
+    echo "COINGECKO_MCP_ENABLED is not truthy; skipping Coingecko MCP server startup." >&2
   else
-    if [ -z "$COINGECKO_KEY" ]; then
-      echo "COINGECKO_PRO_API_KEY/COINGECKO_API_KEY is not set; skipping Coingecko MCP server startup." >&2
+    COINGECKO_KEY=${COINGECKO_PRO_API_KEY:-${COINGECKO_API_KEY:-}}
+    if ! command -v npx >/dev/null 2>&1; then
+      echo "Cannot start Coingecko MCP server because 'npx' is not available." >&2
     else
-      echo "Starting Coingecko MCP server..."
-      env COINGECKO_PRO_API_KEY="$COINGECKO_KEY" \
-          COINGECKO_ENVIRONMENT="${COINGECKO_ENVIRONMENT:-demo}" \
-          npx -y @coingecko/coingecko-mcp >/tmp/coingecko-mcp.log 2>&1 &
-      CG_MCP_PID=$!
-      sleep 1
+      if [ -z "$COINGECKO_KEY" ]; then
+        echo "COINGECKO_PRO_API_KEY/COINGECKO_API_KEY is not set; skipping Coingecko MCP server startup." >&2
+      else
+        echo "Starting Coingecko MCP server..."
+        env COINGECKO_PRO_API_KEY="$COINGECKO_KEY" \
+            COINGECKO_ENVIRONMENT="${COINGECKO_ENVIRONMENT:-demo}" \
+            npx -y @coingecko/coingecko-mcp >/tmp/coingecko-mcp.log 2>&1 &
+        CG_MCP_PID=$!
+        sleep 1
+      fi
     fi
   fi
 else
