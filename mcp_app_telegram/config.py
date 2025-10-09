@@ -238,9 +238,10 @@ def _build_legacy_servers() -> Tuple[McpServerConfig, ...]:
             )
         )
 
-    coingecko_command_env = os.getenv("COINGECKO_MCP_COMMAND")
-    coingecko_api_key = os.getenv("COINGECKO_PRO_API_KEY") or os.getenv("COINGECKO_API_KEY")
-    if coingecko_command_env or coingecko_api_key:
+    coingecko_enabled = _parse_bool_env("COINGECKO_MCP_ENABLED", False)
+    if coingecko_enabled:
+        coingecko_command_env = os.getenv("COINGECKO_MCP_COMMAND")
+        coingecko_api_key = os.getenv("COINGECKO_PRO_API_KEY") or os.getenv("COINGECKO_API_KEY")
         coingecko_command = _parse_command(coingecko_command_env) if coingecko_command_env else ("npx", "-y", "@coingecko/coingecko-mcp")
         env: Dict[str, str] = {}
         if coingecko_api_key:

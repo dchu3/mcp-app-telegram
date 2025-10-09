@@ -30,7 +30,8 @@ Async Telegram bot that surfaces Base Chain data through the MCP EVM server (or 
    Additional knobs:
    - `MCP_SERVERS` – JSON array of MCP server definitions (see below) when running multiple integrations.
    - `MCP_PRIMARY_EVM` / `MCP_PRIMARY_DEXSCREENER` – pick the default server keys for bot commands.
-   - `COINGECKO_PRO_API_KEY` / `COINGECKO_API_KEY` – when set, automatically enables the Coingecko MCP server (override command with `COINGECKO_MCP_COMMAND`).
+   - `COINGECKO_MCP_ENABLED` – opt-in flag for the Coingecko MCP integration (defaults to `false`).
+   - `COINGECKO_PRO_API_KEY` / `COINGECKO_API_KEY` – credentials passed to the Coingecko MCP server once enabled (override the command with `COINGECKO_MCP_COMMAND`).
    - `GEMINI_MODEL_MCP` – override the Gemini model used for Gemini-powered responses (default `gemini-1.5-flash-latest`).
    - `GEMINI_PERSONA` – optional system prompt to shape the agent's voice/persona.
    - `TELEGRAM_HTTP_READ_TIMEOUT` / `TELEGRAM_HTTP_CONNECT_TIMEOUT` – override Telegram HTTP timeouts.
@@ -83,15 +84,8 @@ The script looks for `TELEGRAM_MCP_BOT_TOKEN` and `TELEGRAM_CHAT_ID`, clears exi
 
 ## Telegram Commands
 
-- `/help` – quick reference for all commands and aliases.
-- Send normal text – the Gemini agent (when enabled) inspects the prompt and calls the best MCP tool.
+- `/help` – quick reference for the enabled commands.
 - `/gas` – current gas tiers, sequencer lag, and base fee for the primary network.
-- `/account <address>` – balance, nonce, and contract flag for an address.
-- `/transaction <hash>` / `/tx <hash>` – full transaction status summary.
-- `/gasalert <network> <threshold>` / `/gas_sub ...` – alert when fast gas drops below a threshold.
-- `/gasalertabove <network> <threshold>` / `/gas_sub_above ...` – alert when fast gas rises above a threshold.
-- `/cleargasalerts` / `/gas_clear` – remove pending gas alerts for the chat.
-- `/gasalerts` / `/gas_alerts` – show the current alert subscriptions for the chat.
 - `/pairs` – list every tracked arbitrage pair with age metadata.
 - `/sub <index|pair>` – subscribe this chat to a tracked pair (`/pairs` shows the 1-based index and the literal `pair_key`, e.g. `/sub 1` or `/sub base:foo/usdc@dex`).
 - `/unsub <index|pair>` – remove a tracked pair subscription.
@@ -99,7 +93,9 @@ The script looks for `TELEGRAM_MCP_BOT_TOKEN` and `TELEGRAM_CHAT_ID`, clears exi
 - `/suball` – subscribe the chat to all tracked pairs (if configuration allows).
 - `/unsuball` – clear the global subscription toggle.
 
-Gemini-free installs still support every command above; only the free-form text routing falls back to a setup reminder when no Gemini API key is present.
+Other legacy commands (account lookups, transaction summaries, gas alert management, etc.) remain implemented but are hidden from the Telegram command list while the app focuses on gas telemetry and arbitrage workflows. They can be re-enabled later by expanding the command menu and help text to include the dormant handlers.
+
+Gemini-free installs still support the commands above; only the free-form text routing falls back to a setup reminder when no Gemini API key is present.
 
 ## Testing
 

@@ -137,11 +137,7 @@ async def test_handle_help_outputs_summary():
 
     assert message.replies
     help_text, _ = message.replies[0]
-    assert "Send a normal message" in help_text
     assert "/gas" in help_text
-    assert "/account" in help_text
-    assert "/transaction <hash> (alias /tx)" in help_text
-    assert "\n- /cleargasalerts (alias /gas_clear)" in help_text
     assert "\n- /pairs" in help_text
     assert "\n- /sub <index|pair>" in help_text
     assert "\n- /unsub <index|pair>" in help_text
@@ -182,10 +178,10 @@ def test_commands_registered():
     assert {
         "help",
         "gas",
-        "account",
-        "transaction",
-        "gasalert",
-        "gasalertabove",
-        "cleargasalerts",
-        "gasalerts",
-    }.issubset(names)
+        "pairs",
+        "sub",
+        "unsub",
+        "mysubs",
+        "suball",
+        "unsuball",
+    } == names

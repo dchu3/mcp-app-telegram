@@ -46,16 +46,6 @@ REFRESH_QUERY = "gas_refresh"
 TELEGRAM_COMMANDS = [
     BotCommand("help", "Show available commands"),
     BotCommand("gas", "Show Base gas stats"),
-    # BotCommand("account", "Show account balance and nonce"),
-    # BotCommand("transaction", "Summarize transaction status"),
-    # BotCommand("tx", "Alias for /transaction"),
-    # BotCommand("gasalert", "Alert when fast gas drops below threshold"),
-    # BotCommand("gasalertabove", "Alert when fast gas rises above threshold"),
-    # BotCommand("cleargasalerts", "Clear gas alerts for this chat"),
-    # BotCommand("gasalerts", "List active gas alerts for this chat"),
-    # BotCommand("gas_sub", "Alias for /gasalert"),
-    # BotCommand("gas_sub_above", "Alias for /gasalertabove"),
-    # BotCommand("gas_clear", "Alias for /cleargasalerts"),
     BotCommand("pairs", "List tracked arbitrage pairs"),
     BotCommand("sub", "Subscribe to a tracked pair"),
     BotCommand("unsub", "Remove a pair subscription"),
@@ -74,7 +64,6 @@ ADMIN_TELEGRAM_COMMANDS = [
 
 _HELP_TEXT = (
     "Here are the commands I understand:\n"
-    "- Send a normal message: Gemini agent picks an MCP tool to answer.\n"
     "- /gas : Base gas tiers, base fee, and sequencer lag.\n"
     "- /pairs : List tracked arbitrage pairs with realtime age.\n"
     "- /sub <index|pair> : Subscribe to a tracked pair.\n"
