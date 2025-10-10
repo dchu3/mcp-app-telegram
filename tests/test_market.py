@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from mcp_app_telegram.admin_state import TokenThresholds
 from mcp_app_telegram.arb.profiles import ProfileService
 from mcp_app_telegram.arb.signals import ArbSignalService
 from mcp_app_telegram.config import ScanPairDefinition
@@ -198,6 +199,69 @@ async def test_market_fetcher_filters_pairs_below_thresholds():
     result = await fetcher.fetch_pair(metadata)
     assert result.status == "stale"
     assert "market filters" in result.payload.get("error", "")
+    await fetcher.close()
+
+
+@pytest.mark.asyncio
+async def test_market_fetcher_token_overrides_adjust_filters():
+    metadata = PairMetadata(
+        pair_key="base:token/quote@dex",
+        symbols="TK/USDC",
+        base_symbol="TK",
+        quote_symbol="USDC",
+        base_address="0xbase",
+        quote_address="0xquote",
+        dex_id="dex",
+        fee_tiers=("0.05",),
+    )
+
+    dex_payload = {
+        "pairs": [
+            {
+                "chainId": "base",
+                "dexId": "dexLow",
+                "priceUsd": "1.00",
+                "url": "https://low",
+                "quoteToken": {"address": "0xquote"},
+                "liquidity": {"usd": 10_000},
+                "volume": {"h24": 25_000},
+                "txns": {"h24": {"buys": 300, "sells": 320}},
+            },
+            {
+                "chainId": "base",
+                "dexId": "dexHigh",
+                "priceUsd": "1.02",
+                "url": "https://high",
+                "quoteToken": {"address": "0xquote"},
+                "liquidity": {"usd": 12_000},
+                "volume": {"h24": 28_000},
+                "txns": {"h24": {"buys": 310, "sells": 330}},
+            },
+        ]
+    }
+    http_client = StubHttpClient([
+        ("https://api.dexscreener.com", dex_payload),
+        ("https://api.coingecko.com", {"ethereum": {"eur": 2000}}),
+    ])
+
+    fetcher = MarketDataFetcher(
+        StubEvmClient(),
+        default_size_eur=500.0,
+        mev_buffer_bps=10.0,
+        min_liquidity_usd=50_000.0,
+        min_volume_24h_usd=100_000.0,
+        min_txns_24h=2_400,
+        http_client=http_client,
+    )
+
+    stale = await fetcher.fetch_pair(metadata)
+    assert stale.status == "stale"
+
+    overrides = TokenThresholds(min_liquidity_usd=5_000.0, min_volume_24h_usd=20_000.0, min_txns_24h=400)
+    fetcher.set_token_thresholds(metadata.pair_key, overrides)
+
+    fresh = await fetcher.fetch_pair(metadata)
+    assert fresh.status == "fresh"
     await fetcher.close()
 
 

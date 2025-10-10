@@ -40,3 +40,24 @@ async def test_profile_update_does_not_mutate_default():
     assert other_profile.min_net_bps == 22.0
     assert other_profile.cooldown_seconds == 180
     assert other_profile is not defaults
+
+
+def test_profile_service_default_overrides():
+    store = InMemoryStore()
+    service = ProfileService(store, default_profile=ArbProfile())
+
+    baseline = service.get_default()
+    assert baseline.min_net_bps == service.get_default().min_net_bps
+
+    updated = service.update_default(min_net_bps=35.0, cooldown_seconds=45)
+    assert updated.min_net_bps == 35.0
+    assert updated.cooldown_seconds == 45
+
+    overrides = {"min_net_bps": 40.0, "test_size_eur": 750.0, "venues": ("dexA", "dexB")}
+    applied = service.apply_default_overrides(overrides)
+    assert applied.min_net_bps == 40.0
+    assert applied.test_size_eur == 750.0
+    assert applied.venues == ("dexA", "dexB")
+
+    fresh = service.get_default()
+    assert fresh.min_net_bps == 40.0

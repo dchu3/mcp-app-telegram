@@ -68,3 +68,33 @@ class ProfileService:
         fresh = replace(self._default)
         await self._store.record_profile(chat_id, fresh.to_dict())
         return fresh
+
+    def update_default(self, **kwargs: object) -> ArbProfile:
+        profile = replace(self._default)
+        for key, value in kwargs.items():
+            if not hasattr(profile, key):
+                continue
+            current = getattr(profile, key)
+            try:
+                if isinstance(current, float):
+                    coerced = float(value)
+                elif isinstance(current, int):
+                    coerced = int(value)
+                elif isinstance(current, tuple):
+                    if isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
+                        coerced = tuple(str(item) for item in value)
+                    else:
+                        continue
+                else:
+                    coerced = value
+            except (TypeError, ValueError):
+                continue
+            setattr(profile, key, coerced)
+        self._default = profile
+        return replace(self._default)
+
+    def apply_default_overrides(self, overrides: Mapping[str, object]) -> ArbProfile:
+        return self.update_default(**overrides)
+
+    def get_default(self) -> ArbProfile:
+        return replace(self._default)

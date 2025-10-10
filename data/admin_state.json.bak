@@ -1,0 +1,21 @@
+{
+  "tokens": {
+    "base:0xac1bd2486aaf3b5c0fc3fd868558b082a531b2b4/0x4200000000000000000000000000000000000006@uniswap": {
+      "metadata": {
+        "base_address": "0xac1bd2486aaf3b5c0fc3fd868558b082a531b2b4",
+        "base_symbol": "TOSHI",
+        "dex_id": "uniswap",
+        "fee_tiers": [],
+        "pair_key": "base:0xac1bd2486aaf3b5c0fc3fd868558b082a531b2b4/0x4200000000000000000000000000000000000006@uniswap",
+        "quote_address": "0x4200000000000000000000000000000000000006",
+        "quote_symbol": "WETH",
+        "symbols": "TOSHI/WETH"
+      },
+      "thresholds": {
+        "min_liquidity_usd": 3500000.0,
+        "min_txns_24h": 800,
+        "min_volume_24h_usd": 500000.0
+      }
+    }
+  }
+}
