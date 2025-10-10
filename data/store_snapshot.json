@@ -8,7 +8,8 @@
     "base:0x0b3e328455c4059eeb9e3f84b5543f74e24e7e1b/0x4200000000000000000000000000000000000006@aerodrome",
     "base:0x532f27101965dd16442e59d40670faf5ebb142e4/0x4200000000000000000000000000000000000006@aerodrome",
     "base:0x63706e401c06ac8513145b7687a14804d17f814b/0x4200000000000000000000000000000000000006@pancakeswap",
-    "base:0xa99f6e6785da0f5d6fb42495fe424bce029eeb3e/0x4200000000000000000000000000000000000006@aerodrome"
+    "base:0xa99f6e6785da0f5d6fb42495fe424bce029eeb3e/0x4200000000000000000000000000000000000006@aerodrome",
+    "base:0xac1bd2486aaf3b5c0fc3fd868558b082a531b2b4/0x4200000000000000000000000000000000000006@uniswap"
   ],
   "pair_meta": [
     {
@@ -118,6 +119,16 @@
       "fee_tiers": [
         "0.30"
       ]
+    },
+    {
+      "pair_key": "base:0xac1bd2486aaf3b5c0fc3fd868558b082a531b2b4/0x4200000000000000000000000000000000000006@uniswap",
+      "symbols": "TOSHI/WETH",
+      "base_symbol": "TOSHI",
+      "quote_symbol": "WETH",
+      "base_address": "0xac1bd2486aaf3b5c0fc3fd868558b082a531b2b4",
+      "quote_address": "0x4200000000000000000000000000000000000006",
+      "dex_id": "uniswap",
+      "fee_tiers": []
     }
   ],
   "subs_by_pair": {},

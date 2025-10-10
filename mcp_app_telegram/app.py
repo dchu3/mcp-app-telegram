@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import signal
 import os
+import signal
 from contextlib import suppress
 from pathlib import Path
 from typing import Dict, Optional
@@ -17,6 +17,13 @@ from telegram import (
 )
 
 
+from .admin_cli import (
+    AdminCli,
+    AdminLogBuffer,
+    PromptAwareStreamHandler,
+    PromptState,
+)
+from .admin_state import AdminStateRepository
 from .alerts import GasAlertManager
 from .bot import TELEGRAM_COMMANDS, build_application
 from .config import (
@@ -43,7 +50,13 @@ from .infra.swr import SwrCache
 from .market.fetcher import MarketDataFetcher
 
 
+LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+
+
 async def run() -> None:
+    def _is_truthy(value: str) -> bool:
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+
     initialize_database()
     root_logger = logging.getLogger()
     if not root_logger.handlers:
@@ -65,6 +78,14 @@ async def run() -> None:
     except ConfigError as exc:
         logging.getLogger(__name__).error("Configuration error: %s", exc)
         raise
+
+    admin_state_env = os.getenv("ADMIN_STATE_PATH")
+    if admin_state_env:
+        admin_state_path = Path(admin_state_env).expanduser()
+    else:
+        admin_state_path = Path("data/admin_state.db")
+    admin_state_repo = AdminStateRepository(admin_state_path)
+    admin_state = admin_state_repo.load()
 
     registry = McpClientRegistry()
     network_client_map: Dict[str, str] = {}
@@ -159,6 +180,7 @@ async def run() -> None:
 
     default_profile = ArbProfile()
     profile_service = ProfileService(store, default_profile=default_profile)
+    baseline_profile = profile_service.get_default()
     signal_service = ArbSignalService(default_mev_buffer_bps=config.mev_buffer_bps)
     fetcher = MarketDataFetcher(
         evm_client,
@@ -180,6 +202,31 @@ async def run() -> None:
         },
         fetcher=fetcher.fetch_pair,
     )
+
+    async def apply_admin_overrides() -> None:
+        logger = logging.getLogger(__name__)
+        for pair_key, record in admin_state.tokens.items():
+            if record.metadata is not None:
+                await store.upsert_pair_metadata(record.metadata)
+                try:
+                    await store.ensure_pair_in_scan_set(pair_key)
+                except KeyError:
+                    logger.warning("Admin state referenced unknown pair '%s'", pair_key)
+            fetcher.set_token_thresholds(pair_key, record.thresholds)
+        global_thresholds = admin_state.global_thresholds.to_dict()
+        if global_thresholds:
+            fetcher.set_global_thresholds(
+                min_liquidity_usd=admin_state.global_thresholds.min_liquidity_usd,
+                min_volume_24h_usd=admin_state.global_thresholds.min_volume_24h_usd,
+                min_txns_24h=admin_state.global_thresholds.min_txns_24h,
+            )
+        if admin_state.mev_buffer_bps is not None:
+            fetcher.set_mev_buffer_bps(admin_state.mev_buffer_bps)
+            signal_service.set_default_mev_buffer_bps(admin_state.mev_buffer_bps)
+        if admin_state.default_profile:
+            profile_service.apply_default_overrides(admin_state.default_profile)
+
+    await apply_admin_overrides()
 
     agent = None
     if config.gemini_api_key:
@@ -231,6 +278,65 @@ async def run() -> None:
         with suppress(NotImplementedError):
             loop.add_signal_handler(sig, _stop)
 
+    admin_cli_task: Optional[asyncio.Task[None]] = None
+    admin_cli_enabled = os.getenv("DISABLE_ADMIN_CONSOLE", "").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    admin_prompt_state: Optional[PromptState] = None
+    admin_log_buffer: Optional[AdminLogBuffer] = None
+    admin_quiet_mode = False
+    if admin_cli_enabled:
+        admin_prompt_state = PromptState()
+        console_verbose = _is_truthy(os.getenv("ADMIN_CONSOLE_VERBOSE", ""))
+        admin_quiet_mode = not console_verbose
+        log_buffer_capacity = os.getenv("ADMIN_CONSOLE_LOG_CAPACITY", "")
+        try:
+            capacity = int(log_buffer_capacity) if log_buffer_capacity else 500
+        except ValueError:
+            capacity = 500
+        admin_log_buffer = AdminLogBuffer(capacity=capacity)
+        admin_log_buffer.setFormatter(logging.Formatter(LOG_FORMAT))
+        admin_log_buffer.setLevel(log_level)
+        root_logger.addHandler(admin_log_buffer)
+
+        prompt_handler = PromptAwareStreamHandler(prompt_state=admin_prompt_state)
+        prompt_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+        prompt_handler.setLevel(logging.WARNING if admin_quiet_mode else log_level)
+
+        for handler in list(root_logger.handlers):
+            if handler is admin_log_buffer or handler is prompt_handler:
+                continue
+            if isinstance(handler, PromptAwareStreamHandler):
+                root_logger.removeHandler(handler)
+                continue
+            if isinstance(handler, logging.StreamHandler) and not isinstance(
+                handler, logging.FileHandler
+            ):
+                root_logger.removeHandler(handler)
+
+        root_logger.addHandler(prompt_handler)
+
+        admin_cli = AdminCli(
+            state=admin_state,
+            repository=admin_state_repo,
+            store=store,
+            scheduler=scheduler,
+            fetcher=fetcher,
+            profile_service=profile_service,
+            signal_service=signal_service,
+            stop_callback=_stop,
+            baseline_profile=baseline_profile,
+            log_buffer=admin_log_buffer,
+            prompt_state=admin_prompt_state,
+            quiet_mode=admin_quiet_mode,
+        )
+        admin_cli_task = asyncio.create_task(admin_cli.run(), name="admin-cli")
+    else:
+        logging.getLogger(__name__).info("Admin console disabled via DISABLE_ADMIN_CONSOLE")
+
     application_started = False
 
     logger = logging.getLogger(__name__)
@@ -280,6 +386,10 @@ async def run() -> None:
         for sig in (signal.SIGINT, signal.SIGTERM):
             with suppress(NotImplementedError):
                 loop.remove_signal_handler(sig)
+        if admin_cli_task is not None:
+            admin_cli_task.cancel()
+            with suppress(Exception):
+                await admin_cli_task
         with suppress(Exception):
             await application.updater.stop()
         if application_started:

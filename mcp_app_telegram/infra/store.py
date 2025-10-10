@@ -168,6 +168,40 @@ class InMemoryStore:
             self._pair_meta[metadata.pair_key] = metadata
             await self._save_snapshot_locked()
 
+    async def ensure_pair_in_scan_set(self, pair_key: str) -> None:
+        async with self._lock:
+            if pair_key not in self._pair_meta:
+                raise KeyError(f"Unknown pair key '{pair_key}'")
+            if pair_key not in self._scan_set:
+                self._scan_set.append(pair_key)
+                await self._save_snapshot_locked()
+
+    async def remove_pair(self, pair_key: str) -> bool:
+        async with self._lock:
+            existed = pair_key in self._pair_meta
+            changed = existed
+            self._pair_meta.pop(pair_key, None)
+            if pair_key in self._scan_set:
+                self._scan_set = [key for key in self._scan_set if key != pair_key]
+                changed = True
+            if pair_key in self._subs_by_pair:
+                self._subs_by_pair.pop(pair_key, None)
+                changed = True
+            empty_users = []
+            for chat_id, subscribers in self._subs_by_user.items():
+                subscribers.discard(pair_key)
+                if not subscribers:
+                    empty_users.append(chat_id)
+            for chat_id in empty_users:
+                self._subs_by_user.pop(chat_id, None)
+                changed = True
+            if pair_key in self._swr_by_pair:
+                self._swr_by_pair.pop(pair_key, None)
+                changed = True
+            if changed:
+                await self._save_snapshot_locked()
+            return existed
+
     async def subscribe_pair(self, chat_id: int, pair_key: str) -> None:
         async with self._lock:
             if pair_key not in self._pair_meta:

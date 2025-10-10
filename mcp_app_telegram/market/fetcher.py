@@ -7,6 +7,7 @@ from typing import Any, Dict, Mapping, Optional, Sequence
 
 import httpx
 
+from ..admin_state import TokenThresholds
 from ..arb.signals import ArbCalculationInput, MarketLeg
 from ..infra.store import PairMetadata
 from ..infra.swr import SwrFetchResult
@@ -49,9 +50,11 @@ class MarketDataFetcher:
         self._evm_client = evm_client
         self._default_size_eur = default_size_eur
         self._mev_buffer_bps = mev_buffer_bps
-        self._min_liquidity_usd = max(0.0, float(min_liquidity_usd))
-        self._min_volume_24h_usd = max(0.0, float(min_volume_24h_usd))
-        self._min_txns_24h = max(0, int(min_txns_24h))
+        self._base_min_liquidity_usd = max(0.0, float(min_liquidity_usd))
+        self._base_min_volume_24h_usd = max(0.0, float(min_volume_24h_usd))
+        self._base_min_txns_24h = max(0, int(min_txns_24h))
+        self._global_overrides = TokenThresholds()
+        self._token_overrides: Dict[str, TokenThresholds] = {}
         self._client = http_client or httpx.AsyncClient(timeout=timeout)
         self._owns_client = http_client is None
         self._eth_price_cache: tuple[float, float] = (0.0, 0.0)  # (timestamp, price)
@@ -113,7 +116,7 @@ class MarketDataFetcher:
             price_usd = self._safe_float(pair.get("priceUsd"))
             if price_usd <= 0:
                 continue
-            if not self._meets_market_filters(pair):
+            if not self._meets_market_filters(pair, metadata.pair_key):
                 continue
             eligible.append((pair, price_usd))
 
@@ -152,15 +155,104 @@ class MarketDataFetcher:
             },
         )
 
-    def _meets_market_filters(self, pair: Mapping[str, Any]) -> bool:
+    def set_global_thresholds(
+        self,
+        *,
+        min_liquidity_usd: Optional[float] = None,
+        min_volume_24h_usd: Optional[float] = None,
+        min_txns_24h: Optional[int] = None,
+    ) -> None:
+        if min_liquidity_usd is not None and min_liquidity_usd < 0:
+            raise ValueError("min_liquidity_usd must be >= 0")
+        if min_volume_24h_usd is not None and min_volume_24h_usd < 0:
+            raise ValueError("min_volume_24h_usd must be >= 0")
+        if min_txns_24h is not None and min_txns_24h < 0:
+            raise ValueError("min_txns_24h must be >= 0")
+        self._global_overrides = TokenThresholds(
+            min_liquidity_usd=min_liquidity_usd,
+            min_volume_24h_usd=min_volume_24h_usd,
+            min_txns_24h=min_txns_24h,
+        )
+
+    def get_global_thresholds(self) -> TokenThresholds:
+        return TokenThresholds(
+            min_liquidity_usd=self._global_overrides.min_liquidity_usd,
+            min_volume_24h_usd=self._global_overrides.min_volume_24h_usd,
+            min_txns_24h=self._global_overrides.min_txns_24h,
+        )
+
+    def set_token_thresholds(self, pair_key: str, thresholds: Optional[TokenThresholds]) -> None:
+        if thresholds is None or not thresholds.to_dict():
+            self._token_overrides.pop(pair_key, None)
+            return
+        if thresholds.min_liquidity_usd is not None and thresholds.min_liquidity_usd < 0:
+            raise ValueError("min_liquidity_usd must be >= 0")
+        if thresholds.min_volume_24h_usd is not None and thresholds.min_volume_24h_usd < 0:
+            raise ValueError("min_volume_24h_usd must be >= 0")
+        if thresholds.min_txns_24h is not None and thresholds.min_txns_24h < 0:
+            raise ValueError("min_txns_24h must be >= 0")
+        self._token_overrides[pair_key] = thresholds
+
+    def get_token_thresholds(self, pair_key: str) -> TokenThresholds:
+        return self._token_overrides.get(pair_key, TokenThresholds())
+
+    def get_base_thresholds(self) -> TokenThresholds:
+        return TokenThresholds(
+            min_liquidity_usd=self._base_min_liquidity_usd,
+            min_volume_24h_usd=self._base_min_volume_24h_usd,
+            min_txns_24h=self._base_min_txns_24h,
+        )
+
+    def set_mev_buffer_bps(self, value: float) -> None:
+        if value < 0:
+            raise ValueError("mev_buffer_bps must be >= 0")
+        self._mev_buffer_bps = value
+
+    def get_mev_buffer_bps(self) -> float:
+        return self._mev_buffer_bps
+
+    def get_effective_thresholds(self, pair_key: Optional[str] = None) -> TokenThresholds:
+        effective = self._effective_thresholds(pair_key)
+        return TokenThresholds(
+            min_liquidity_usd=effective.min_liquidity_usd,
+            min_volume_24h_usd=effective.min_volume_24h_usd,
+            min_txns_24h=effective.min_txns_24h,
+        )
+
+    def _effective_thresholds(self, pair_key: Optional[str]) -> TokenThresholds:
+        liquidity = self._global_overrides.min_liquidity_usd
+        volume = self._global_overrides.min_volume_24h_usd
+        txns = self._global_overrides.min_txns_24h
+        if liquidity is None:
+            liquidity = self._base_min_liquidity_usd
+        if volume is None:
+            volume = self._base_min_volume_24h_usd
+        if txns is None:
+            txns = self._base_min_txns_24h
+        overrides = self._token_overrides.get(pair_key) if pair_key else None
+        if overrides is not None:
+            if overrides.min_liquidity_usd is not None:
+                liquidity = overrides.min_liquidity_usd
+            if overrides.min_volume_24h_usd is not None:
+                volume = overrides.min_volume_24h_usd
+            if overrides.min_txns_24h is not None:
+                txns = overrides.min_txns_24h
+        return TokenThresholds(
+            min_liquidity_usd=liquidity,
+            min_volume_24h_usd=volume,
+            min_txns_24h=txns,
+        )
+
+    def _meets_market_filters(self, pair: Mapping[str, Any], pair_key: str) -> bool:
+        thresholds = self._effective_thresholds(pair_key)
         liquidity = self._safe_float((pair.get("liquidity") or {}).get("usd"))
-        if liquidity < self._min_liquidity_usd:
+        if liquidity < thresholds.min_liquidity_usd:
             return False
         volume_24h = self._safe_float((pair.get("volume") or {}).get("h24"))
-        if volume_24h < self._min_volume_24h_usd:
+        if volume_24h < thresholds.min_volume_24h_usd:
             return False
         txns_24h = self._extract_txns_24h(pair.get("txns"))
-        if txns_24h < self._min_txns_24h:
+        if txns_24h < thresholds.min_txns_24h:
             return False
         return True
 

@@ -74,6 +74,24 @@ Use the helper script so the virtual environment is activated automatically:
 ```
 The bot starts long-polling until you press `Ctrl+C`. When running in MCP mode it automatically spawns the EVM MCP server via stdio; override the command with `MCP_EVM_SERVER_COMMAND` if you host your own build.
 
+### Admin console
+
+`./start.sh` now boots an interactive admin console alongside the bot. The CLI shares the same event loop as the Telegram worker, so any changes take effect immediately:
+
+- `token add <pair_key> --symbols TK/USDC --base-symbol TK --quote-symbol USDC --base-address 0x... [--quote-address 0x...] [--dex-id foo] [--fee-tier 0.30]`
+- `token set-thresholds <pair_key> [--min-liquidity 25000] [--min-volume 50000] [--min-txns 500]`
+- `token remove <pair_key>`
+- `settings set-global [--min-liquidity ...] [--min-volume ...] [--min-txns ...]`
+- `settings set-mev --bps 12`
+- `arb-profile set [--min-net-bps ...] [--test-size-eur ...] [--slippage-cap-bps ...]`
+- `arb-profile reset`
+- `log [n]`
+- `help` / `quit`
+
+State is persisted to `data/admin_state.db` by default; override the location with `ADMIN_STATE_PATH=/path/to/state.db`. Legacy JSON files (`admin_state.json`) are migrated into SQLite automatically on first run. To disable the console entirely—useful for containerized or non-interactive deployments—set `DISABLE_ADMIN_CONSOLE=1` before launching.
+
+When the console is active the standard output handler switches to quiet mode (warnings and errors only) so that the prompt remains readable. Use the inline `log` command to view the latest entries recorded by the in-memory buffer, or export `ADMIN_CONSOLE_VERBOSE=1` to restore the original console log level. Adjust the buffer depth by setting `ADMIN_CONSOLE_LOG_CAPACITY` (default `500`).
+
 ### Registering commands only
 
 If you just want to verify Telegram command registration without starting any MCP servers, run:
@@ -101,9 +119,9 @@ Gemini-free installs still support the commands above; only the free-form text r
 
 Run the full suite with:
 ```bash
-pytest
+./venv-dev/bin/pytest
 ```
-All tests are async-friendly and mock external services.
+or activate the developer environment (`source venv-dev/bin/activate`) and use `pytest`. All tests are async-friendly and mock external services.
 
 ## Debugging Telegram Delivery
 

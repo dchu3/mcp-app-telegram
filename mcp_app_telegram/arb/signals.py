@@ -86,6 +86,11 @@ class ArbSignalService:
             confidence=confidence,
         )
 
+    def set_default_mev_buffer_bps(self, value: float) -> None:
+        if value < 0:
+            raise ValueError("default MEV buffer must be >= 0")
+        self._default_mev_buffer_bps = value
+
     def _gas_to_bps(self, gas_cost_eur: float, size_eur: float) -> float:
         if size_eur <= 0:
             return math.inf
