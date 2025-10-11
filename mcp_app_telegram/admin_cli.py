@@ -10,6 +10,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from threading import Lock
 from typing import Optional, Sequence
+from types import SimpleNamespace
 
 from .admin_state import (
     AdminState,
@@ -286,6 +287,13 @@ class AdminCli:
         thresholds_parser.add_argument("--min-txns", type=int)
         thresholds_parser.add_argument("--clear", action="store_true")
 
+        edit_parser = subparsers.add_parser("edit", add_help=False)
+        edit_parser.add_argument("pair_key")
+        edit_parser.add_argument("--min-liquidity", type=float)
+        edit_parser.add_argument("--min-volume", type=float)
+        edit_parser.add_argument("--min-txns", type=int)
+        edit_parser.add_argument("--clear", action="store_true")
+
         remove_parser = subparsers.add_parser("remove", add_help=False)
         remove_parser.add_argument("pair_key")
 
@@ -296,6 +304,8 @@ class AdminCli:
             self._token_view(ns)
         elif ns.command == "set-thresholds":
             await self._token_set_thresholds(ns)
+        elif ns.command == "edit":
+            await self._token_edit(ns)
         elif ns.command == "remove":
             await self._token_remove(ns.pair_key)
 
@@ -503,6 +513,181 @@ class AdminCli:
         self._save_state()
         print(f"[admin] Updated thresholds for '{pair_key}'")
 
+    async def _token_edit(self, ns) -> None:
+        pair_key = ns.pair_key.strip()
+        if not pair_key:
+            raise CommandError("pair_key must not be empty")
+
+        if ns.clear:
+            await self._token_set_thresholds(
+                SimpleNamespace(
+                    pair_key=pair_key,
+                    min_liquidity=None,
+                    min_volume=None,
+                    min_txns=None,
+                    clear=True,
+                )
+            )
+            return
+
+        record = self._state.tokens.get(pair_key)
+        if record is None or record.metadata is None:
+            raise CommandError(
+                "unknown pair; add it first with 'token add' or seed it in the scan list"
+            )
+
+        current_thresholds = record.thresholds
+        if not current_thresholds.to_dict():
+            current_thresholds = TokenThresholds()
+
+        effective_thresholds = self._fetcher.get_effective_thresholds(pair_key)
+
+        interactive = all(
+            getattr(ns, field) is None for field in ("min_liquidity", "min_volume", "min_txns")
+        )
+
+        def _resolve_value(
+            attr: str,
+            prompt_callback,
+            override_value,
+            effective_value,
+        ):
+            value = getattr(ns, attr)
+            if value is not None:
+                return value
+            if interactive:
+                return prompt_callback(override_value, effective_value)
+            return override_value
+
+        min_liquidity = _resolve_value(
+            "min_liquidity",
+            self._prompt_liquidity,
+            current_thresholds.min_liquidity_usd,
+            effective_thresholds.min_liquidity_usd,
+        )
+        min_volume = _resolve_value(
+            "min_volume",
+            self._prompt_volume,
+            current_thresholds.min_volume_24h_usd,
+            effective_thresholds.min_volume_24h_usd,
+        )
+        min_txns = _resolve_value(
+            "min_txns",
+            self._prompt_txns,
+            current_thresholds.min_txns_24h,
+            effective_thresholds.min_txns_24h,
+        )
+
+        new_thresholds = TokenThresholds(
+            min_liquidity_usd=min_liquidity,
+            min_volume_24h_usd=min_volume,
+            min_txns_24h=min_txns,
+        )
+
+        existing_dict = current_thresholds.to_dict()
+        new_dict = new_thresholds.to_dict()
+
+        if new_dict == existing_dict:
+            print("[admin] No changes applied; thresholds unchanged.")
+            return
+
+        if not new_dict:
+            if existing_dict:
+                await self._token_set_thresholds(
+                    SimpleNamespace(
+                        pair_key=pair_key,
+                        min_liquidity=None,
+                        min_volume=None,
+                        min_txns=None,
+                        clear=True,
+                    )
+                )
+            else:
+                print("[admin] No changes applied; thresholds unchanged.")
+            return
+
+        await self._token_set_thresholds(
+            SimpleNamespace(
+                pair_key=pair_key,
+                min_liquidity=min_liquidity,
+                min_volume=min_volume,
+                min_txns=min_txns,
+                clear=False,
+            )
+        )
+
+    def _prompt_liquidity(
+        self,
+        current_override: Optional[float],
+        effective_value: Optional[float],
+    ) -> Optional[float]:
+        return self._prompt_numeric(
+            label="Min liquidity (USD)",
+            current_override=current_override,
+            effective_value=effective_value,
+            is_float=True,
+        )
+
+    def _prompt_volume(
+        self,
+        current_override: Optional[float],
+        effective_value: Optional[float],
+    ) -> Optional[float]:
+        return self._prompt_numeric(
+            label="Min volume (24h USD)",
+            current_override=current_override,
+            effective_value=effective_value,
+            is_float=True,
+        )
+
+    def _prompt_txns(
+        self,
+        current_override: Optional[int],
+        effective_value: Optional[int],
+    ) -> Optional[int]:
+        return self._prompt_numeric(
+            label="Min transactions (24h)",
+            current_override=current_override,
+            effective_value=effective_value,
+            is_float=False,
+        )
+
+    def _prompt_numeric(
+        self,
+        *,
+        label: str,
+        current_override: Optional[float | int],
+        effective_value: Optional[float | int],
+        is_float: bool,
+    ) -> Optional[float | int]:
+        override_display = "-" if current_override is None else (
+            f"{float(current_override):.0f}" if is_float else str(int(current_override))
+        )
+        effective_display = "-" if effective_value is None else (
+            f"{float(effective_value):.0f}" if is_float else str(int(effective_value))
+        )
+        prompt = (
+            f"{label} [override={override_display}, effective={effective_display}] "
+            "(blank=keep, 'clear'=remove): "
+        )
+        try:
+            raw_value = _input_with_prompt(prompt)
+        except (EOFError, KeyboardInterrupt) as exc:
+            raise CommandError("edit cancelled") from exc
+        raw = raw_value.strip()
+        if not raw:
+            return current_override
+        lowered = raw.lower()
+        if lowered in {"clear", "none"}:
+            return None
+        try:
+            value = float(raw) if is_float else int(raw)
+        except ValueError as exc:
+            raise CommandError(f"invalid numeric value for {label.lower()}") from exc
+        if value < 0:
+            raise CommandError(f"{label} must be >= 0")
+        return float(value) if is_float else int(value)
+
     async def _token_remove(self, pair_key: str) -> None:
         pair_key = pair_key.strip()
         if not pair_key:
@@ -629,6 +814,7 @@ class AdminCli:
             "  token view [--rows N] [--offset M] [--table]  View persisted tokens in SQLite\n"
             "  token add <pair_key> [options]   Add a new token to monitor\n"
             "  token set-thresholds <pair>      Override per-token filters\n"
+            "  token edit <pair>                Interactively edit per-token filters\n"
             "  token remove <pair>              Remove token overrides\n"
             "  settings show                    Display global settings\n"
             "  settings set-global [options]    Update global market filters\n"
