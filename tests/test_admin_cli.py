@@ -229,3 +229,123 @@ def test_token_view_table_output(capsys: pytest.CaptureFixture[str]) -> None:
     assert "TABLE/USDC" in lines[3]
     assert "250.00K" in lines[3]
     assert "750" in lines[3]
+
+
+@pytest.mark.asyncio
+async def test_token_edit_updates_thresholds_with_flags() -> None:
+    cli = _build_cli()
+    pair_key = "base:alpha/usdc@dex"
+    record = TokenAdminRecord(
+        metadata=PairMetadata(
+            pair_key=pair_key,
+            symbols="ALPHA/USDC",
+            base_symbol="ALPHA",
+            quote_symbol="USDC",
+            base_address="0xalpha",
+            quote_address="0xusdc",
+            dex_id="dex",
+            fee_tiers=("0.30",),
+        ),
+        thresholds=TokenThresholds(
+            min_liquidity_usd=100000.0,
+            min_volume_24h_usd=200000.0,
+            min_txns_24h=75,
+        ),
+    )
+    cli._state.tokens[pair_key] = record
+    cli._fetcher.get_effective_thresholds.return_value = TokenThresholds(
+        min_liquidity_usd=100000.0,
+        min_volume_24h_usd=200000.0,
+        min_txns_24h=75,
+    )
+
+    await cli._token_edit(
+        SimpleNamespace(
+            pair_key=pair_key,
+            min_liquidity=150000.0,
+            min_volume=None,
+            min_txns=120,
+            clear=False,
+        )
+    )
+
+    thresholds = cli._state.tokens[pair_key].thresholds
+    assert thresholds.min_liquidity_usd == 150000.0
+    assert thresholds.min_volume_24h_usd == 200000.0
+    assert thresholds.min_txns_24h == 120
+    cli._fetcher.set_token_thresholds.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_token_edit_interactive_prompts(monkeypatch: pytest.MonkeyPatch) -> None:
+    cli = _build_cli()
+    pair_key = "base:beta/usdc@dex"
+    record = TokenAdminRecord(
+        metadata=PairMetadata(
+            pair_key=pair_key,
+            symbols="BETA/USDC",
+            base_symbol="BETA",
+            quote_symbol="USDC",
+            base_address="0xbeta",
+            quote_address="0xusdc",
+            dex_id="dex",
+            fee_tiers=("0.30",),
+        ),
+        thresholds=TokenThresholds(
+            min_liquidity_usd=180000.0,
+            min_volume_24h_usd=90000.0,
+            min_txns_24h=40,
+        ),
+    )
+    cli._state.tokens[pair_key] = record
+    cli._fetcher.get_effective_thresholds.return_value = TokenThresholds(
+        min_liquidity_usd=200000.0,
+        min_volume_24h_usd=95000.0,
+        min_txns_24h=45,
+    )
+
+    responses = iter(["250000", "clear", ""])
+
+    def _fake_input(_: str) -> str:
+        try:
+            return next(responses)
+        except StopIteration:
+            return ""
+
+    monkeypatch.setattr("mcp_app_telegram.admin_cli._input_with_prompt", _fake_input)
+
+    await cli._token_edit(
+        SimpleNamespace(
+            pair_key=pair_key,
+            min_liquidity=None,
+            min_volume=None,
+            min_txns=None,
+            clear=False,
+        )
+    )
+
+    thresholds = cli._state.tokens[pair_key].thresholds
+    assert thresholds.min_liquidity_usd == 250000.0
+    assert thresholds.min_volume_24h_usd is None
+    assert thresholds.min_txns_24h == 40
+    cli._fetcher.set_token_thresholds.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_token_edit_rejects_unknown_pair() -> None:
+    cli = _build_cli()
+    cli._fetcher.get_effective_thresholds.return_value = TokenThresholds(
+        min_liquidity_usd=100000.0,
+        min_volume_24h_usd=200000.0,
+        min_txns_24h=75,
+    )
+    with pytest.raises(CommandError):
+        await cli._token_edit(
+            SimpleNamespace(
+                pair_key="base:missing/usdc@dex",
+                min_liquidity=150000.0,
+                min_volume=None,
+                min_txns=None,
+                clear=False,
+            )
+        )
