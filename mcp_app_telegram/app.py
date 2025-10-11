@@ -23,7 +23,12 @@ from .admin_cli import (
     PromptAwareStreamHandler,
     PromptState,
 )
-from .admin_state import AdminStateRepository
+from .admin_seed import (
+    ensure_tokens_seeded,
+    metadata_from_scan_pairs,
+    metadata_from_state,
+)
+from .admin_state import AdminStateRepository, TokenThresholds
 from .alerts import GasAlertManager
 from .bot import TELEGRAM_COMMANDS, build_application
 from .config import (
@@ -86,6 +91,21 @@ async def run() -> None:
         admin_state_path = Path("data/admin_state.db")
     admin_state_repo = AdminStateRepository(admin_state_path)
     admin_state = admin_state_repo.load()
+
+    default_thresholds = TokenThresholds(
+        min_liquidity_usd=config.min_liquidity_usd,
+        min_volume_24h_usd=config.min_volume_24h_usd,
+        min_txns_24h=config.min_txns_24h,
+    )
+
+    seeded = ensure_tokens_seeded(
+        repository=admin_state_repo,
+        state=admin_state,
+        scan_pairs=config.scan_pairs,
+        default_thresholds=default_thresholds,
+    )
+    if seeded:
+        admin_state = admin_state_repo.load()
 
     registry = McpClientRegistry()
     network_client_map: Dict[str, str] = {}
@@ -163,7 +183,10 @@ async def run() -> None:
     snapshot_path = Path(snapshot_env) if snapshot_env else None
     store = InMemoryStore(snapshot_path)
     await store.load_snapshot()
-    await store.initialize_pairs(config.scan_pairs, config.scan_size)
+    initial_metadata = metadata_from_state(admin_state)
+    if not initial_metadata:
+        initial_metadata = metadata_from_scan_pairs(config.scan_pairs)
+    await store.initialize_pairs(initial_metadata, config.scan_size)
 
     per_host_rates = {
         "dexscreener": 60,
