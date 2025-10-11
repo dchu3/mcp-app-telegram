@@ -24,6 +24,57 @@ from .infra.store import InMemoryStore, PairMetadata
 from .market.fetcher import MarketDataFetcher
 
 
+def _format_number(value: Optional[float]) -> str:
+    if value is None:
+        return "-"
+    abs_value = abs(value)
+    if abs_value >= 1_000_000_000:
+        return f"{value / 1_000_000_000:.2f}B"
+    if abs_value >= 1_000_000:
+        return f"{value / 1_000_000:.2f}M"
+    if abs_value >= 1_000:
+        return f"{value / 1_000:.2f}K"
+    return f"{value:.0f}"
+
+
+def _format_integer(value: Optional[int]) -> str:
+    return "-" if value is None else str(value)
+
+
+def _format_pair_label(pair_key: str, metadata: Optional[PairMetadata]) -> str:
+    """Return a concise pair label such as TOKEN@dex for table output."""
+
+    def _first_symbol(symbols: str) -> str:
+        head = symbols.split("/")[0].strip()
+        return head or symbols.strip()
+
+    base_symbol = ""
+    dex_id = ""
+    if metadata:
+        base_symbol = (metadata.base_symbol or "").strip()
+        if not base_symbol and metadata.symbols:
+            base_symbol = _first_symbol(metadata.symbols)
+        dex_id = (metadata.dex_id or "").strip()
+        if base_symbol:
+            return f"{base_symbol}@{dex_id}" if dex_id else base_symbol
+        if metadata.symbols:
+            fallback = _first_symbol(metadata.symbols)
+            if fallback:
+                return f"{fallback}@{dex_id}" if dex_id else fallback
+
+    prefix, _, suffix = pair_key.partition("@")
+    dex_id = suffix.strip()
+    base_fragment = prefix.split(":")[-1]
+    if "/" in base_fragment:
+        base_fragment = base_fragment.split("/")[0]
+    base_fragment = base_fragment.strip()
+    if base_fragment and dex_id:
+        return f"{base_fragment}@{dex_id}"
+    if base_fragment:
+        return base_fragment
+    return pair_key
+
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -223,6 +274,11 @@ class AdminCli:
         add_parser.add_argument("--min-volume", type=float)
         add_parser.add_argument("--min-txns", type=int)
 
+        view_parser = subparsers.add_parser("view", add_help=False)
+        view_parser.add_argument("--rows", type=int, default=10)
+        view_parser.add_argument("--offset", type=int, default=0)
+        view_parser.add_argument("--table", action="store_true")
+
         thresholds_parser = subparsers.add_parser("set-thresholds", add_help=False)
         thresholds_parser.add_argument("pair_key")
         thresholds_parser.add_argument("--min-liquidity", type=float)
@@ -236,6 +292,8 @@ class AdminCli:
         ns = parser.parse_args(argv)
         if ns.command == "add":
             await self._token_add(ns)
+        elif ns.command == "view":
+            self._token_view(ns)
         elif ns.command == "set-thresholds":
             await self._token_set_thresholds(ns)
         elif ns.command == "remove":
@@ -326,6 +384,94 @@ class AdminCli:
         self._state.tokens[pair_key] = record
         self._save_state()
         print(f"[admin] Added token '{pair_key}'")
+
+    def _token_view(self, ns) -> None:
+        rows = ns.rows
+        if rows is not None and rows <= 0:
+            raise CommandError("--rows must be greater than zero")
+
+        offset = getattr(ns, "offset", 0)
+        if offset < 0:
+            raise CommandError("--offset must be zero or greater")
+
+        records, total = self._repository.list_tokens(limit=rows, offset=offset)
+        if total == 0:
+            print("No persisted tokens in admin repository.")
+            return
+
+        if offset >= total:
+            print(
+                f"No tokens available at offset {offset}; total stored tokens: {total}"
+            )
+            return
+
+        limit_desc = "all" if rows is None else str(rows)
+        shown = len(records)
+        print(
+            f"Stored tokens (showing {shown} of {total}, offset={offset}, limit={limit_desc}):"
+        )
+        if getattr(ns, "table", False):
+            self._print_token_table(records)
+        else:
+            for pair_key, record in records:
+                parts = [f"  - {pair_key}"]
+                metadata = record.metadata
+                if metadata is not None:
+                    parts.append(f"symbols={metadata.symbols}")
+                    parts.append(f"base={metadata.base_symbol}")
+                    parts.append(f"quote={metadata.quote_symbol}")
+                    if metadata.dex_id:
+                        parts.append(f"dex={metadata.dex_id}")
+                thresholds = record.thresholds.to_dict()
+                if thresholds:
+                    parts.append(f"thresholds={thresholds}")
+                print(" | ".join(parts))
+
+        if rows is not None and (offset + shown) < total:
+            next_offset = offset + shown
+            remaining = total - next_offset
+            print(
+                f"... {remaining} more entr{'y' if remaining == 1 else 'ies'} available."
+                f" Rerun with --offset {next_offset}."
+            )
+
+    def _print_token_table(self, records: list[tuple[str, TokenAdminRecord]]) -> None:
+        headers = ("Pair", "Symbols", "Min Liquidity", "Min Volume", "Min Txns")
+        rows: list[tuple[str, str, str, str, str]] = []
+        for pair_key, record in records:
+            metadata = record.metadata
+            symbols = metadata.symbols if metadata else pair_key
+            thresholds = record.thresholds
+            if not thresholds.to_dict():
+                effective = self._fetcher.get_effective_thresholds(pair_key)
+            else:
+                effective = thresholds
+            rows.append(
+                (
+                    _format_pair_label(pair_key, metadata),
+                    symbols,
+                    _format_number(effective.min_liquidity_usd),
+                    _format_number(effective.min_volume_24h_usd),
+                    _format_integer(effective.min_txns_24h),
+                )
+            )
+
+        widths = [len(header) for header in headers]
+        for row in rows:
+            for idx, cell in enumerate(row):
+                widths[idx] = max(widths[idx], len(cell))
+
+        def _print_row(columns: tuple[str, ...]) -> None:
+            formatted = "  " + "  ".join(
+                value.ljust(widths[idx]) for idx, value in enumerate(columns)
+            )
+            print(formatted.rstrip())
+
+        _print_row(headers)
+        separator = "  " + "  ".join("-" * width for width in widths)
+        print(separator)
+        for row in rows:
+            _print_row(row)
 
     async def _token_set_thresholds(self, ns) -> None:
         pair_key = ns.pair_key.strip()
@@ -480,6 +626,7 @@ class AdminCli:
             "Available commands:\n"
             "  help                             Show this message\n"
             "  token list                       List tracked tokens\n"
+            "  token view [--rows N] [--offset M] [--table]  View persisted tokens in SQLite\n"
             "  token add <pair_key> [options]   Add a new token to monitor\n"
             "  token set-thresholds <pair>      Override per-token filters\n"
             "  token remove <pair>              Remove token overrides\n"

@@ -158,6 +158,31 @@ class AdminStateRepository:
         with self._connect() as conn:
             self._write_state(conn, state)
 
+    def list_tokens(
+        self,
+        *,
+        limit: Optional[int] = None,
+        offset: int = 0,
+    ) -> tuple[list[tuple[str, TokenAdminRecord]], int]:
+        """Return a slice of persisted token records and the total count."""
+
+        state = self.load()
+        items = sorted(state.tokens.items(), key=lambda item: item[0].lower())
+        total = len(items)
+
+        if offset <= 0:
+            start = 0
+        else:
+            start = min(offset, total)
+
+        page = items[start:]
+        if limit is not None:
+            if limit <= 0:
+                page = []
+            else:
+                page = page[:limit]
+        return page, total
+
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._path)
         conn.row_factory = sqlite3.Row

@@ -91,3 +91,51 @@ def test_admin_state_migrates_from_json(tmp_path):
 
     backup_candidates = list(tmp_path.glob("admin_state.json.bak"))
     assert backup_candidates, "legacy file should be archived"
+
+
+def test_admin_state_list_tokens_limit(tmp_path):
+    path = tmp_path / "admin_state.db"
+    repo = AdminStateRepository(path)
+
+    state = AdminState()
+    first = PairMetadata(
+        pair_key="chain:first/quote@dex",
+        symbols="FIRST/USDC",
+        base_symbol="FIRST",
+        quote_symbol="USDC",
+        base_address="0x1",
+        quote_address="0x2",
+        dex_id="dex",
+        fee_tiers=("0.30",),
+    )
+    second = PairMetadata(
+        pair_key="chain:second/quote@dex",
+        symbols="SECOND/USDC",
+        base_symbol="SECOND",
+        quote_symbol="USDC",
+        base_address="0x3",
+        quote_address="0x4",
+        dex_id="dex",
+        fee_tiers=(),
+    )
+    state.tokens[first.pair_key] = TokenAdminRecord(
+        metadata=first,
+        thresholds=TokenThresholds(min_liquidity_usd=1000.0),
+    )
+    state.tokens[second.pair_key] = TokenAdminRecord(metadata=second)
+    repo.save(state)
+
+    limited, total = repo.list_tokens(limit=1)
+    assert total == 2
+    assert len(limited) == 1
+    assert limited[0][0] in {first.pair_key, second.pair_key}
+
+    all_tokens, total_all = repo.list_tokens()
+    assert total_all == 2
+    assert len(all_tokens) == 2
+
+    offset_page, _ = repo.list_tokens(limit=1, offset=1)
+    assert len(offset_page) == 1
+
+    beyond_page, _ = repo.list_tokens(limit=1, offset=5)
+    assert beyond_page == []

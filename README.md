@@ -79,6 +79,7 @@ The bot starts long-polling until you press `Ctrl+C`. When running in MCP mode i
 `./start.sh` now boots an interactive admin console alongside the bot. The CLI shares the same event loop as the Telegram worker, so any changes take effect immediately:
 
 - `token add <pair_key> --symbols TK/USDC --base-symbol TK --quote-symbol USDC --base-address 0x... [--quote-address 0x...] [--dex-id foo] [--fee-tier 0.30]`
+- `token view [--rows 10] [--offset 0] [--table]`
 - `token set-thresholds <pair_key> [--min-liquidity 25000] [--min-volume 50000] [--min-txns 500]`
 - `token remove <pair_key>`
 - `settings set-global [--min-liquidity ...] [--min-volume ...] [--min-txns ...]`
@@ -87,6 +88,10 @@ The bot starts long-polling until you press `Ctrl+C`. When running in MCP mode i
 - `arb-profile reset`
 - `log [n]`
 - `help` / `quit`
+
+`token view` reads directly from the SQLite-backed admin store. By default it shows the first 10 records and reports how many entries exist overall; bump the window with `--rows` and step through the dataset with `--offset` to paginate. Add `--table` for a compact view that highlights per-token liquidity, volume, and 24h txn thresholds, with the pair column condensed to `BASE@dex` for quick scanning.
+
+At startup the app syncs `config/scan_set.json` into the SQLite store if it is empty, so every legacy pair becomes editable through the CLI. Any liquidity/volume/transactions thresholds you supply with `token add` or `token set-thresholds` are persisted immediately—no restart or code change required.
 
 State is persisted to `data/admin_state.db` by default; override the location with `ADMIN_STATE_PATH=/path/to/state.db`. Legacy JSON files (`admin_state.json`) are migrated into SQLite automatically on first run. To disable the console entirely—useful for containerized or non-interactive deployments—set `DISABLE_ADMIN_CONSOLE=1` before launching.
 
