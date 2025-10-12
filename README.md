@@ -1,6 +1,14 @@
 # mcp-app-telegram
 
-Async Telegram bot that surfaces Base Chain data through the MCP EVM server (or a JSON-RPC endpoint fallback). It is designed for operators who want on-chain telemetry delivered straight into chat.
+Async Telegram bot that surfaces Base Chain and DeFi telemetry through MCP integrations or JSON-RPC fallbacks. The bot delivers gas snapshots, arbitrage opportunity signals, token analytics, and natural-language answers directly to Telegram while exposing a live admin console for managing tracked pairs and thresholds without restarts.
+
+Key capabilities include:
+- Real-time gas, pair, and arbitrage command set with optional Gemini-powered Q&A.
+- Dexscreener and Coingecko MCP tooling for on-demand token intelligence.
+- SQLite-backed admin console for adding, editing, and inspecting token thresholds alongside global arbitrage settings.
+- Seamless seeding from legacy JSON configs and automatic MCP server orchestration during startup.
+
+Disclaimer: Arbitrage signals and thresholds provided by this bot are for informational purposes only. They do not constitute financial advice, and you should always do your own research before executing trades.
 
 ## Prerequisites
 
