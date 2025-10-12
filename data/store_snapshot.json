@@ -9,7 +9,9 @@
     "base:0x532f27101965dd16442e59d40670faf5ebb142e4/0x4200000000000000000000000000000000000006@aerodrome",
     "base:0x63706e401c06ac8513145b7687a14804d17f814b/0x4200000000000000000000000000000000000006@pancakeswap",
     "base:0xa99f6e6785da0f5d6fb42495fe424bce029eeb3e/0x4200000000000000000000000000000000000006@aerodrome",
-    "base:0xac1bd2486aaf3b5c0fc3fd868558b082a531b2b4/0x4200000000000000000000000000000000000006@uniswap"
+    "base:0xac1bd2486aaf3b5c0fc3fd868558b082a531b2b4/0x4200000000000000000000000000000000000006@uniswap",
+    "base:0x2e1d332893Dc16124194E598a29866D2d5e8786b/0x4200000000000000000000000000000000000006@uniswap",
+    "base:0xFAC77f01957ed1B3DD1cbEa992199B8f85B6E886/0x4200000000000000000000000000000000000006@uniswap"
   ],
   "pair_meta": [
     {
@@ -126,6 +128,26 @@
       "base_symbol": "TOSHI",
       "quote_symbol": "WETH",
       "base_address": "0xac1bd2486aaf3b5c0fc3fd868558b082a531b2b4",
+      "quote_address": "0x4200000000000000000000000000000000000006",
+      "dex_id": "uniswap",
+      "fee_tiers": []
+    },
+    {
+      "pair_key": "base:0x2e1d332893Dc16124194E598a29866D2d5e8786b/0x4200000000000000000000000000000000000006@uniswap",
+      "symbols": "TRUMP/WETH",
+      "base_symbol": "TRUMP",
+      "quote_symbol": "WETH",
+      "base_address": "0x2e1d332893Dc16124194E598a29866D2d5e8786b",
+      "quote_address": "0x4200000000000000000000000000000000000006",
+      "dex_id": "uniswap",
+      "fee_tiers": []
+    },
+    {
+      "pair_key": "base:0xFAC77f01957ed1B3DD1cbEa992199B8f85B6E886/0x4200000000000000000000000000000000000006@uniswap",
+      "symbols": "FACY/WETH",
+      "base_symbol": "FACY",
+      "quote_symbol": "WETH",
+      "base_address": "0xFAC77f01957ed1B3DD1cbEa992199B8f85B6E886",
       "quote_address": "0x4200000000000000000000000000000000000006",
       "dex_id": "uniswap",
       "fee_tiers": []
