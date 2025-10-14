@@ -130,7 +130,9 @@
       "base_address": "0xac1bd2486aaf3b5c0fc3fd868558b082a531b2b4",
       "quote_address": "0x4200000000000000000000000000000000000006",
       "dex_id": "uniswap",
-      "fee_tiers": []
+      "fee_tiers": [
+        "0.30"
+      ]
     },
     {
       "pair_key": "base:0x2e1d332893Dc16124194E598a29866D2d5e8786b/0x4200000000000000000000000000000000000006@uniswap",
@@ -140,7 +142,9 @@
       "base_address": "0x2e1d332893Dc16124194E598a29866D2d5e8786b",
       "quote_address": "0x4200000000000000000000000000000000000006",
       "dex_id": "uniswap",
-      "fee_tiers": []
+      "fee_tiers": [
+        "0.30"
+      ]
     },
     {
       "pair_key": "base:0xFAC77f01957ed1B3DD1cbEa992199B8f85B6E886/0x4200000000000000000000000000000000000006@uniswap",
@@ -150,7 +154,9 @@
       "base_address": "0xFAC77f01957ed1B3DD1cbEa992199B8f85B6E886",
       "quote_address": "0x4200000000000000000000000000000000000006",
       "dex_id": "uniswap",
-      "fee_tiers": []
+      "fee_tiers": [
+        "0.30"
+      ]
     }
   ],
   "subs_by_pair": {},
